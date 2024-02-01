@@ -1,4 +1,2 @@
 # rlx
-A reinforcement learning framework based on MLX.
-
-Keywords: mlx, reinforcement learning, mlx reinforcement learning
+Implementations of popular RL algorithms in MLX by Apple based on CleanRL.
