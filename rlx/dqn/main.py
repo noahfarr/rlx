@@ -63,13 +63,6 @@ def make_env(env_id, seed):
 
 
 def copy_weights(source, target, tau):
-    # layers = source.parameters()["layers"]
-    # weights = []
-    # for i, layer in enumerate(layers):
-    #     weights.append((f"layers.{i}.weight", layer["weight"]))
-    #     weights.append((f"layers.{i}.bias", layer["bias"]))
-    # target.load_weights(weights)
-
     weights = []
     for i, (target_network_param, q_network_param) in enumerate(
         zip(
