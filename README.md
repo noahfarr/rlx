@@ -1,2 +1,2 @@
 # rlx
-Implementations of popular RL algorithms in MLX by Apple based on CleanRL.
+Implementations of popular RL algorithms in MLX by Apple.
