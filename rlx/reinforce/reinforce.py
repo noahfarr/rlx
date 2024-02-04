@@ -20,7 +20,7 @@ class REINFORCE:
 
     def get_log_probs(self, observations, actions):
         logits = self.policy(observations)
-        probs = nn.softmax(logits)[mx.arange(len(actions)), actions]
+        probs = nn.softmax(logits)[mx.arange(actions.shape[0]), actions]
         log_probs = mx.log(probs)
         return log_probs
 
