@@ -13,14 +13,12 @@ RLX is a collection of Reinforcement Learning algorithms implemented in MLX, App
 Clone the repository to your local machine:
 
 ```bash
-Copy code
 git clone https://github.com/noahfarr/rlx.git
 cd rlx
 ```
 
 Install dependencies using Poetry:
 ```bash
-Copy code
 poetry install
 ```
 
@@ -37,7 +35,6 @@ The project is organized into directories by algorithm. Each directory contains 
 To run a specific algorithm, navigate to its directory and execute the main script. For example:
 
 ```bash
-Copy code
 cd alg1
 poetry run python main.py
 ```
