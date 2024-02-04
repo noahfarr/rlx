@@ -1,34 +1,24 @@
-from dataclasses import dataclass
+import mlx.core as mx
 
 
-@dataclass
 class RolloutBuffer:
-    observations: list[list[float]]
-    actions: list[list[int]]
-    rewards: list[int]
-    terminations: list[int]
-    truncations: list[int]
-
     def __init__(self):
-        self.observations = []
-        self.actions = []
-        self.rewards = []
-        self.terminations = []
-        self.truncations = []
-        self.returns = []
+        self.buffer = {}
 
-    def append(self, obs, next_obs, action, reward, terminated, truncated):
-        self.observations.append(obs.tolist())
-        if terminated:
-            self.observations.append(next_obs.tolist())
-        self.actions.append(action)
-        self.rewards.append(reward)
-        self.terminations.append(int(terminated))
-        self.truncations.append(int(truncated))
+    def add(self, **kwargs):
+        for key, value in kwargs.items():
+            if key not in self.buffer:
+                self.buffer[key] = []
+            self.buffer[key].append(mx.array(value))
 
     def clear(self):
-        self.observations = []
-        self.actions = []
-        self.rewards = []
-        self.terminations = []
-        self.truncations = []
+        self.buffer = {}
+
+    def get(self, key):
+        return mx.array(self.buffer.get(key, None))
+
+    def __getitem__(self, key):
+        return self.get(key)
+
+    def __str__(self):
+        return str(self.buffer)

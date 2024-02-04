@@ -3,14 +3,14 @@ import argparse
 import numpy as np
 
 import mlx.core as mx
+import mlx.nn as nn
 
 import gymnasium as gym
 
 import rlx.a2c.hyperparameters as h
 from rlx.a2c.a2c import A2C
-from rlx.common.mlp import MLP
 from rlx.common.rollout_buffer import RolloutBuffer
-from rlx.common.utils import get_discounted_sum_of_rewards
+from rlx.common.utils import get_rewards_to_go
 
 
 def parse_args():
@@ -54,13 +54,68 @@ def parse_args():
     return parser.parse_args()
 
 
+class Actor(nn.Module):
+    def __init__(
+        self,
+        num_layers: int,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        activations: str,
+    ):
+        super().__init__()
+        layer_sizes = [input_dim] + [hidden_dim] * num_layers + [output_dim]
+        self.layers = [
+            nn.Linear(idim, odim)
+            for idim, odim in zip(layer_sizes[:-1], layer_sizes[1:])
+        ]
+        self.activations = activations
+        assert (
+            len(self.layers) == len(self.activations) + 1
+        ), "Number of layers and activations must match"
+
+    def __call__(self, x):
+        for layer, activation in zip(self.layers[:-1], self.activations):
+            x = activation(layer(x))
+        x = self.layers[-1](x)
+        return x
+
+
+class Critic(nn.Module):
+    def __init__(
+        self,
+        num_layers: int,
+        input_dim: int,
+        hidden_dim: int,
+        activations: str,
+    ):
+        super().__init__()
+        layer_sizes = [input_dim] + [hidden_dim] * num_layers + [1]
+        self.layers = [
+            nn.Linear(idim, odim)
+            for idim, odim in zip(layer_sizes[:-1], layer_sizes[1:])
+        ]
+        self.activations = activations
+        assert (
+            len(self.layers) == len(self.activations) + 1
+        ), "Number of layers and activations must match"
+
+    def __call__(self, x):
+        for layer, activation in zip(self.layers[:-1], self.activations):
+            x = activation(layer(x))
+        x = self.layers[-1](x)
+        return x
+
+
 def main():
     args = parse_args()
     env = gym.make(
         id=args.env_id,
         render_mode=args.render,
     )
-    actor = MLP(
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+
+    actor = Actor(
         num_layers=args.actor_num_layers,
         input_dim=env.observation_space.shape[0],
         hidden_dim=args.actor_hidden_dim,
@@ -71,11 +126,10 @@ def main():
 
     actor_optimizer = args.actor_optimizer(learning_rate=args.actor_learning_rate)
 
-    critic = MLP(
+    critic = Critic(
         num_layers=args.critic_num_layers,
         input_dim=env.observation_space.shape[0],
         hidden_dim=args.critic_hidden_dim,
-        output_dim=1,
         activations=args.critic_activations,
     )
     mx.eval(critic.parameters())
@@ -94,37 +148,36 @@ def main():
     timestep = 0
 
     while timestep < args.total_timesteps:
-        obs, info = env.reset()
-        terminated = truncated = False
+        obs, _ = env.reset()
+        done = False
         rollout_buffer.clear()
-        while not terminated and not truncated:
+        while not done:
             action = agent.get_action(mx.array(obs))
-            new_obs, reward, terminated, truncated, info = env.step(action)
-            rollout_buffer.append(
-                obs,
-                new_obs,
-                action,
-                reward,
-                terminated,
-                truncated,
+            next_obs, reward, terminated, truncated, info = env.step(action)
+            rollout_buffer.add(
+                obs=obs,
+                action=action,
+                reward=reward,
+                terminated=terminated,
             )
-            obs = new_obs
-            timestep += 1
-            if timestep % 5000 == 0:
-                print("Mean return: ", np.mean(np.array(rollout_buffer.returns)))
+            obs = next_obs
+            done = terminated or truncated
 
             if terminated:
-                rollout_buffer.observations.append(mx.array(obs.tolist()))
-                break
-            if truncated:
-                break
-        observations = mx.array(rollout_buffer.observations)
-        actions = mx.array(rollout_buffer.actions)
-        rewards = np.array(rollout_buffer.rewards)
-        terminations = mx.array(rollout_buffer.terminations)
-        rollout_buffer.returns.append(np.sum(rewards))
-        discounted_rewards = get_discounted_sum_of_rewards(rewards, gamma=args.gamma)
-        agent.update(observations, actions, discounted_rewards, terminations)
+                rollout_buffer.add(
+                    obs=obs,
+                )
+
+            timestep += 1
+            if "episode" in info:
+                print(f"Timestep: {timestep}, Episodic Returns: {info['episode']['r']}")
+
+        observations = rollout_buffer.get("obs")
+        actions = rollout_buffer.get("action")
+        rewards = rollout_buffer.get("reward")
+        terminations = rollout_buffer.get("terminated")
+        rewards_to_go = get_rewards_to_go(rewards, args.gamma)
+        agent.update(observations, actions, rewards_to_go, terminations)
 
 
 if __name__ == "__main__":

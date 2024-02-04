@@ -1,16 +1,17 @@
 import argparse
+from typing import Any
 
 import numpy as np
 
 import mlx.core as mx
+import mlx.nn as nn
 
 import gymnasium as gym
 
 import rlx.reinforce.hyperparameters as h
 from rlx.reinforce.reinforce import REINFORCE
-from rlx.common.mlp import MLP
 from rlx.common.rollout_buffer import RolloutBuffer
-from rlx.common.utils import get_discounted_sum_of_rewards
+from rlx.common.utils import get_rewards_to_go
 
 
 def parse_args():
@@ -39,13 +40,42 @@ def parse_args():
     return parser.parse_args()
 
 
+class Policy(nn.Module):
+    def __init__(
+        self,
+        num_layers: int,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        activations: str,
+    ):
+        super().__init__()
+        layer_sizes = [input_dim] + [hidden_dim] * num_layers + [output_dim]
+        self.layers = [
+            nn.Linear(idim, odim)
+            for idim, odim in zip(layer_sizes[:-1], layer_sizes[1:])
+        ]
+        self.activations = activations
+        assert (
+            len(self.layers) == len(self.activations) + 1
+        ), "Number of layers and activations must match"
+
+    def __call__(self, x):
+        for layer, activation in zip(self.layers[:-1], self.activations):
+            x = activation(layer(x))
+        x = self.layers[-1](x)
+        return x
+
+
 def main():
     args = parse_args()
     env = gym.make(
         id=args.env_id,
         render_mode=args.render,
     )
-    policy = MLP(
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+
+    policy = Policy(
         num_layers=args.num_layers,
         input_dim=env.observation_space.shape[0],
         hidden_dim=args.hidden_dim,
@@ -63,30 +93,27 @@ def main():
     timestep = 0
 
     while timestep < args.total_timesteps:
-        obs, info = env.reset()
-        terminated = truncated = False
+        obs, _ = env.reset()
+        done = False
         rollout_buffer.clear()
-        while not terminated and not truncated:
+        while not done:
             action = agent.get_action(mx.array(obs))
-            new_obs, reward, terminated, truncated, info = env.step(action)
-            rollout_buffer.append(
-                obs,
-                new_obs,
-                action,
-                reward,
-                terminated,
-                truncated,
+            next_obs, reward, terminated, truncated, info = env.step(action)
+            rollout_buffer.add(
+                obs=obs,
+                action=action,
+                reward=reward,
             )
-            obs = new_obs
+            obs = next_obs
+            done = terminated or truncated
             timestep += 1
-            if timestep % 5000 == 0:
-                print("Mean return: ", np.mean(np.array(rollout_buffer.returns)))
-        observations = mx.array(rollout_buffer.observations)
-        actions = mx.array(rollout_buffer.actions)
-        rewards = np.array(rollout_buffer.rewards)
-        rollout_buffer.returns.append(np.sum(rewards))
-        discounted_rewards = get_discounted_sum_of_rewards(rewards, gamma=args.gamma)
-        agent.update(observations, actions, discounted_rewards)
+            if "episode" in info:
+                print(f"Timestep: {timestep}, Episodic Returns: {info['episode']['r']}")
+        observations = rollout_buffer.get("obs")
+        actions = rollout_buffer.get("action")
+        rewards = rollout_buffer.get("reward")
+        rewards_to_go = get_rewards_to_go(rewards, args.gamma)
+        agent.update(observations, actions, rewards_to_go)
 
 
 if __name__ == "__main__":

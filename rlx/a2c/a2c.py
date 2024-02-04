@@ -19,11 +19,11 @@ class A2C:
     def get_values(self, observations):
         return self.critic(observations)
 
-    def get_advantages(self, observations, rewards, terminations):
+    def get_advantages(self, observations, rewards_to_go, terminations):
         values = self.get_values(observations[:-1])
         next_values = self.get_values(observations[1:])
         advantages = (
-            mx.array(rewards)
+            mx.array(rewards_to_go)
             + (mx.ones_like(terminations) - terminations) * next_values
             - values
         )
@@ -40,18 +40,16 @@ class A2C:
         loss = mx.sum(-log_probs * advantages)
         return loss
 
-    def critic_loss_fn(self, observations, rewards, terminations):
-        advantages = self.get_advantages(observations, rewards, terminations)
+    def critic_loss_fn(self, observations, rewards_to_go, terminations):
+        advantages = self.get_advantages(observations, rewards_to_go, terminations)
         loss = advantages.square().mean()
         return loss
 
-    def update(self, observations, actions, rewards, terminations):
-        advantages = self.get_advantages(observations, rewards, terminations)
-        actor_loss, actor_grads = self.actor_loss_and_grad_fn(
-            observations, actions, advantages
-        )
-        critic_loss, critic_grads = self.critic_loss_and_grad_fn(
-            observations, rewards, terminations
+    def update(self, observations, actions, rewards_to_go, terminations):
+        advantages = self.get_advantages(observations, rewards_to_go, terminations)
+        _, actor_grads = self.actor_loss_and_grad_fn(observations, actions, advantages)
+        _, critic_grads = self.critic_loss_and_grad_fn(
+            observations, rewards_to_go, terminations
         )
         self.actor_optimizer.update(self.actor, actor_grads)
         mx.eval(self.actor.parameters(), self.actor_optimizer.state)

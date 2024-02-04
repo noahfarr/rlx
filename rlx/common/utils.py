@@ -1,11 +1,10 @@
-import numpy as np
 import mlx.core as mx
 
 
-def get_discounted_sum_of_rewards(rewards, gamma):
-    return mx.array(
-        [
-            np.sum(rewards[i:] * (gamma ** np.array(range(i, len(rewards)))))
-            for i in range(len(rewards))
-        ]
-    )
+def get_rewards_to_go(rewards, gamma):
+    rewards_to_go = mx.zeros(len(rewards))
+    next_reward_to_go = 0
+    for t in reversed(range(len(rewards))):
+        rewards_to_go[t] = rewards[t] + gamma * next_reward_to_go
+        next_reward_to_go = rewards_to_go[t]
+    return rewards_to_go
