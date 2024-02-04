@@ -1,17 +1,16 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
 import argparse
-import random
 
 import gymnasium as gym
+
+import mlx.nn as nn
+import mlx.core as mx
+import mlx.optimizers as optim
 import numpy as np
 from stable_baselines3.common.buffers import ReplayBuffer
 
-import mlx.core as mx
-import mlx.nn as nn
-import mlx.optimizers as optim
 
-import rlx.sac.hyperparameters as h
-from rlx.sac.sac import SAC
+import rlx.td3.hyperparameters as h
+from rlx.td3.td3 import TD3
 
 
 def parse_args():
@@ -28,35 +27,22 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env_id", type=str, default=h.env_id)
     parser.add_argument("--total_timesteps", type=int, default=h.total_timesteps)
+    parser.add_argument("--learning_rate", type=float, default=h.learning_rate)
     parser.add_argument("--buffer_size", type=int, default=h.buffer_size)
-    parser.add_argument("--q_lr", type=float, default=h.q_lr)
-    parser.add_argument("--policy_lr", type=float, default=h.policy_lr)
-    parser.add_argument("--policy_frequency", type=int, default=h.policy_frequency)
-    parser.add_argument(
-        "--target_network_frequency", type=int, default=h.target_network_frequency
-    )
+    parser.add_argument("--gamma", type=float, default=h.gamma)
     parser.add_argument("--tau", type=float, default=h.tau)
     parser.add_argument("--batch_size", type=int, default=h.batch_size)
+    parser.add_argument("--policy_noise", type=float, default=h.policy_noise)
+    parser.add_argument("--exploration_noise", type=float, default=h.exploration_noise)
     parser.add_argument("--learning_starts", type=int, default=h.learning_starts)
-    parser.add_argument("--gamma", type=float, default=h.gamma)
-    parser.add_argument("--alpha", type=float, default=h.alpha)
-    parser.add_argument("--autotune", type=bool, default=h.autotune)
+    parser.add_argument("--policy_frequency", type=int, default=h.policy_frequency)
+    parser.add_argument("--noise_clip", type=float, default=h.noise_clip)
 
     args = parser.parse_args()
     return args
 
 
-def make_env(env_id, seed):
-    def thunk():
-        env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env.action_space.seed(seed)
-        return env
-
-    return thunk
-
-
-class SoftQNetwork(nn.Module):
+class QNetwork(nn.Module):
     def __init__(
         self,
         num_layers,
@@ -79,22 +65,26 @@ class SoftQNetwork(nn.Module):
         x = mx.concatenate([x, a], axis=1)
         for layer, activation in zip(self.layers[:-1], self.activations):
             x = activation(layer(x))
-        x = self.layers[-1](x)
-        return x
-
-
-LOG_STD_MAX = 2
-LOG_STD_MIN = -5
+        return self.layers[-1](x)
 
 
 class Actor(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc_mean = nn.Linear(256, np.prod(env.single_action_space.shape))
-        self.fc_logstd = nn.Linear(256, np.prod(env.single_action_space.shape))
+        layer_sizes = (
+            [np.array(env.single_observation_space.shape).prod()]
+            + [256]
+            + [256]
+            + [np.prod(env.single_action_space.shape)]
+        )
+        self.layers = [
+            nn.Linear(idim, odim)
+            for idim, odim in zip(layer_sizes[:-1], layer_sizes[1:])
+        ]
 
+        self.activations = [nn.relu, nn.relu, nn.tanh]
+
+        # action rescaling
         self.action_scale = mx.array(
             (env.single_action_space.high - env.single_action_space.low) / 2.0,
             dtype=mx.float32,
@@ -107,16 +97,19 @@ class Actor(nn.Module):
         self.freeze(recurse=False, keys=["action_scale", "action_bias"])
 
     def __call__(self, x):
-        x = nn.relu(self.fc1(x))
-        x = nn.relu(self.fc2(x))
-        mean = self.fc_mean(x)
-        log_std = self.fc_logstd(x)
-        log_std = nn.tanh(log_std)
-        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (
-            log_std + 1
-        )  # From SpinUp / Denis Yarats
+        for layer, activation in zip(self.layers, self.activations):
+            x = activation(layer(x))
+        return x * self.action_scale + self.action_bias
 
-        return mean, log_std
+
+def make_env(env_id, seed):
+    def thunk():
+        env = gym.make(env_id)
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env.action_space.seed(seed)
+        return env
+
+    return thunk
 
 
 def copy_weights(source, target, tau):
@@ -137,65 +130,70 @@ def copy_weights(source, target, tau):
 
         weights.append((f"layers.{i}.weight", weight))
         weights.append((f"layers.{i}.bias", bias))
+
+    if hasattr(source, "action_scale"):
+        weights.append(("action_scale", source.action_scale))
+    if hasattr(source, "action_bias"):
+        weights.append(("action_bias", source.action_bias))
     target.load_weights(weights)
 
 
-if __name__ == "__main__":
+def sample_normal(mean, std, shape=None):
+    if shape is None:
+        shape = []
+    normal = mx.random.normal(shape=shape)
+    return mean + std * normal
+
+
+def main():
     args = parse_args()
-
-    # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-
-    # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed)])
-    obs, info = envs.reset()
     assert isinstance(
         envs.single_action_space, gym.spaces.Box
     ), "only continuous action space is supported"
 
-    max_action = float(envs.single_action_space.high[0])
-
     actor = Actor(envs)
-    mx.eval(actor.parameters())
-    qf1 = SoftQNetwork(
-        2,
-        np.array(envs.single_observation_space.shape).prod()
+    qf1 = QNetwork(
+        num_layers=2,
+        input_dim=np.array(envs.single_observation_space.shape).prod()
         + np.prod(envs.single_action_space.shape),
-        256,
-        [nn.relu, nn.relu],
+        hidden_dim=256,
+        activations=[nn.relu, nn.relu],
     )
-    mx.eval(qf1.parameters())
-    qf2 = SoftQNetwork(
-        2,
-        np.array(envs.single_observation_space.shape).prod()
+    qf2 = QNetwork(
+        num_layers=2,
+        input_dim=np.array(envs.single_observation_space.shape).prod()
         + np.prod(envs.single_action_space.shape),
-        256,
-        [nn.relu, nn.relu],
+        hidden_dim=256,
+        activations=[nn.relu, nn.relu],
     )
-    mx.eval(qf2.parameters())
-    qf1_target = SoftQNetwork(
-        2,
-        np.array(envs.single_observation_space.shape).prod()
+
+    qf1_target = QNetwork(
+        num_layers=2,
+        input_dim=np.array(envs.single_observation_space.shape).prod()
         + np.prod(envs.single_action_space.shape),
-        256,
-        [nn.relu, nn.relu],
+        hidden_dim=256,
+        activations=[nn.relu, nn.relu],
     )
-    qf2_target = SoftQNetwork(
-        2,
-        np.array(envs.single_observation_space.shape).prod()
+    qf2_target = QNetwork(
+        num_layers=2,
+        input_dim=np.array(envs.single_observation_space.shape).prod()
         + np.prod(envs.single_action_space.shape),
-        256,
-        [nn.relu, nn.relu],
+        hidden_dim=256,
+        activations=[nn.relu, nn.relu],
     )
+
+    target_actor = Actor(envs)
+
+    copy_weights(actor, target_actor, 1.0)
     copy_weights(qf1, qf1_target, 1.0)
     copy_weights(qf2, qf2_target, 1.0)
 
-    actor_optimizer = optim.Adam(learning_rate=args.policy_lr)
-    qf1_optimizer = optim.Adam(learning_rate=args.q_lr)
-    qf2_optimizer = optim.Adam(learning_rate=args.q_lr)
+    qf1_optimizer = optim.Adam(learning_rate=args.learning_rate)
+    qf2_optimizer = optim.Adam(learning_rate=args.learning_rate)
+    actor_optimizer = optim.Adam(learning_rate=args.learning_rate)
 
-    agent = SAC(
+    agent = TD3(
         actor=actor,
         qf1=qf1,
         qf2=qf2,
@@ -205,15 +203,6 @@ if __name__ == "__main__":
         qf1_optimizer=qf1_optimizer,
         qf2_optimizer=qf2_optimizer,
     )
-
-    # Automatic entropy tuning
-    if args.autotune:
-        target_entropy = -mx.prod(mx.array(envs.single_action_space.shape)).item()
-        log_alpha = mx.zeros(1)
-        alpha = log_alpha.exp().item()
-        a_optimizer = optim.Adam(learning_rate=args.q_lr)
-    else:
-        alpha = args.alpha
 
     envs.single_observation_space.dtype = np.float32
     rb = ReplayBuffer(
@@ -232,8 +221,11 @@ if __name__ == "__main__":
                 [envs.single_action_space.sample() for _ in range(envs.num_envs)]
             )
         else:
-            actions, _, _ = agent.get_action(mx.array(obs))
-            actions = np.array(actions)
+            actions = actor(mx.array(obs))
+            actions += sample_normal(0, actor.action_scale * args.exploration_noise)
+            actions = np.array(actions).clip(
+                envs.single_action_space.low, envs.single_action_space.high
+            )
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
@@ -261,44 +253,43 @@ if __name__ == "__main__":
             data = rb.sample(args.batch_size)
             observations = mx.array(data.observations.numpy())
             actions = mx.array(data.actions.numpy())
-            rewards = mx.array(data.rewards.numpy())
-            dones = mx.array(data.dones.numpy())
+            rewards = mx.array(data.rewards.numpy()).flatten()
+            dones = mx.array(data.dones.numpy()).flatten()
             next_observations = mx.array(data.next_observations.numpy())
 
-            next_state_actions, next_state_log_pi, _ = agent.get_action(
-                next_observations
-            )
-            qf1_next_target = qf1_target(
-                next_observations,
-                next_state_actions,
-            )
-            qf2_next_target = qf2_target(
-                next_observations,
-                next_state_actions,
-            )
-            min_qf_next_target = (
-                mx.minimum(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
+            clipped_noise = (
+                mx.clip(
+                    sample_normal(0, 1, actions.shape) * args.policy_noise,
+                    -args.noise_clip,
+                    args.noise_clip,
+                )
+                * target_actor.action_scale
             )
 
-            next_q_value = rewards.flatten() + (
-                1 - dones.flatten()
-            ) * args.gamma * min_qf_next_target.reshape(-1)
+            next_state_actions = mx.clip(
+                target_actor(next_observations) + clipped_noise,
+                mx.array(envs.single_action_space.low[0]),
+                mx.array(envs.single_action_space.high[0]),
+            )
+            qf1_next_target = qf1_target(next_observations, next_state_actions)
+            qf2_next_target = qf2_target(next_observations, next_state_actions)
+            min_qf_next_target = mx.minimum(qf1_next_target, qf2_next_target)
+            next_q_value = rewards.flatten() + (1 - dones.flatten()) * args.gamma * (
+                min_qf_next_target
+            ).reshape(-1)
 
             agent.update_q_networks(next_q_value, observations, actions)
 
-            if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
-                for _ in range(
-                    args.policy_frequency
-                ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                    agent.update_actor(observations, alpha)
-                    if args.autotune:
-                        _, log_prob, _ = actor.get_action(observations)
-                        agent.update_entropy(log_alpha, log_prob, target_entropy)
-                        alpha = log_alpha.exp().item()
+            if global_step % args.policy_frequency == 0:
+                agent.update_actor(observations)
 
-            # update the target networks
-            if global_step % args.target_network_frequency == 0:
+                # update the target network
+                copy_weights(actor, target_actor, args.tau)
                 copy_weights(qf1, qf1_target, args.tau)
                 copy_weights(qf2, qf2_target, args.tau)
 
     envs.close()
+
+
+if __name__ == "__main__":
+    main()
