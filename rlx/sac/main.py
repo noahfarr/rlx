@@ -11,6 +11,7 @@ import mlx.nn as nn
 import mlx.optimizers as optim
 
 import rlx.sac.hyperparameters as h
+from rlx.sac.sac import SAC
 
 
 def parse_args():
@@ -55,32 +56,6 @@ def make_env(env_id, seed):
     return thunk
 
 
-def q_loss_fn(qf1, qf2, next_q_value, observations, actions):
-    qf1_a_values = qf1(observations, actions).reshape(-1)
-    qf2_a_values = qf2(observations, actions).reshape(-1)
-    qf1_loss = nn.losses.mse_loss(qf1_a_values, next_q_value)
-    qf2_loss = nn.losses.mse_loss(qf2_a_values, next_q_value)
-    qf_loss = qf1_loss + qf2_loss
-    return qf_loss
-
-
-def actor_loss_fn(actor, qf1, qf2, observations, alpha):
-    pi, log_pi, _ = actor.get_action(observations)
-    qf1_pi = qf1(observations, pi)
-    qf2_pi = qf2(observations, pi)
-    min_qf_pi = mx.minimum(qf1_pi, qf2_pi)
-    actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
-    return actor_loss
-
-
-def entropy_loss_fn(log_alpha, log_prob, target_entropy):
-    alpha_loss = (-log_alpha.exp() * (log_prob + target_entropy)).mean()
-    return alpha_loss
-
-
-entropy_loss_and_grad_fn = mx.value_and_grad(entropy_loss_fn)
-
-
 class SoftQNetwork(nn.Module):
     def __init__(
         self,
@@ -94,8 +69,6 @@ class SoftQNetwork(nn.Module):
         )
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
-
-        self.loss_and_grad_fn = nn.value_and_grad(self, q_loss_fn)
 
     def __call__(self, x, a):
         x = mx.concatenate([x, a], axis=1)
@@ -128,8 +101,6 @@ class Actor(nn.Module):
 
         self.freeze(recurse=False, keys=["action_scale", "action_bias"])
 
-        self.loss_and_grad_fn = nn.value_and_grad(self, actor_loss_fn)
-
     def __call__(self, x):
         x = nn.relu(self.fc1(x))
         x = nn.relu(self.fc2(x))
@@ -141,34 +112,6 @@ class Actor(nn.Module):
         )  # From SpinUp / Denis Yarats
 
         return mean, log_std
-
-    def sample_normal(self, mean, std):
-        normal = mx.random.normal()
-        return mean + std * normal
-
-    def get_log_prob(self, sample, mean, std):
-        variance = std.square()
-        log_variance = variance.log()
-        return -0.5 * (
-            log_variance
-            + mx.log(mx.array(2 * mx.pi))
-            + ((sample - mean).square() / variance)
-        )
-
-    def get_action(self, x):
-        mean, log_std = self(x)
-        std = log_std.exp()
-        x_t = self.sample_normal(
-            mean, std
-        )  # for reparameterization trick (mean + std * N(0,1))
-        y_t = nn.tanh(x_t)
-        action = y_t * self.action_scale + self.action_bias
-        log_prob = self.get_log_prob(x_t, mean, std)
-        # Enforcing Action Bound
-        log_prob -= mx.log(self.action_scale * (1 - y_t.square()) + 1e-6)
-        log_prob = log_prob.sum(1, keepdims=True)
-        mean = nn.tanh(mean) * self.action_scale + self.action_bias
-        return action, log_prob, mean
 
 
 def copy_weights(source, target, tau):
@@ -219,10 +162,20 @@ if __name__ == "__main__":
     copy_weights(qf1, qf1_target, 1.0)
     copy_weights(qf2, qf2_target, 1.0)
 
+    actor_optimizer = optim.Adam(learning_rate=args.policy_lr)
     qf1_optimizer = optim.Adam(learning_rate=args.q_lr)
     qf2_optimizer = optim.Adam(learning_rate=args.q_lr)
 
-    actor_optimizer = optim.Adam(learning_rate=args.policy_lr)
+    agent = SAC(
+        actor=actor,
+        qf1=qf1,
+        qf2=qf2,
+        qf1_target=qf1_target,
+        qf2_target=qf2_target,
+        actor_optimizer=actor_optimizer,
+        qf1_optimizer=qf1_optimizer,
+        qf2_optimizer=qf2_optimizer,
+    )
 
     # Automatic entropy tuning
     if args.autotune:
@@ -250,7 +203,7 @@ if __name__ == "__main__":
                 [envs.single_action_space.sample() for _ in range(envs.num_envs)]
             )
         else:
-            actions, _, _ = actor.get_action(mx.array(obs))
+            actions, _, _ = agent.get_action(mx.array(obs))
             actions = np.array(actions)
 
         # TRY NOT TO MODIFY: execute the game and log data.
@@ -283,7 +236,7 @@ if __name__ == "__main__":
             dones = mx.array(data.dones.numpy())
             next_observations = mx.array(data.next_observations.numpy())
 
-            next_state_actions, next_state_log_pi, _ = actor.get_action(
+            next_state_actions, next_state_log_pi, _ = agent.get_action(
                 next_observations
             )
             qf1_next_target = qf1_target(
@@ -302,47 +255,16 @@ if __name__ == "__main__":
                 1 - dones.flatten()
             ) * args.gamma * min_qf_next_target.reshape(-1)
 
-            qf1_loss, qf1_grads = qf1.loss_and_grad_fn(
-                qf1,
-                qf2,
-                next_q_value,
-                observations,
-                actions,
-            )
-            qf2_loss, qf2_grads = qf2.loss_and_grad_fn(
-                qf1,
-                qf2,
-                next_q_value,
-                observations,
-                actions,
-            )
-            qf1_optimizer.update(qf1, qf1_grads)
-            qf2_optimizer.update(qf2, qf2_grads)
-
-            mx.eval(qf1.parameters(), qf1_optimizer.state)
-            mx.eval(qf2.parameters(), qf2_optimizer.state)
+            agent.update_q_networks(next_q_value, observations, actions)
 
             if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
                 for _ in range(
                     args.policy_frequency
                 ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                    actor_loss, actor_grads = actor.loss_and_grad_fn(
-                        actor,
-                        qf1,
-                        qf2,
-                        observations,
-                        alpha,
-                    )
-                    actor_optimizer.update(actor, actor_grads)
-                    mx.eval(actor.parameters(), actor_optimizer.state)
-
+                    agent.update_actor(observations, alpha)
                     if args.autotune:
                         _, log_prob, _ = actor.get_action(observations)
-                        entropy_loss, entropy_grad = entropy_loss_and_grad_fn(
-                            log_alpha,
-                            log_prob,
-                            target_entropy,
-                        )
+                        agent.update_entropy(log_alpha, log_prob, target_entropy)
                         alpha = log_alpha.exp().item()
 
             # update the target networks
