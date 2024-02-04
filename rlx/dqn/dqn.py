@@ -1,8 +1,5 @@
 import mlx.core as mx
 import mlx.nn as nn
-import numpy as np
-
-from rlx.common.mlp import MLP
 
 
 class DQN:
@@ -32,7 +29,7 @@ class DQN:
         observations = mx.array(data.observations.numpy())
         actions = mx.array(data.actions.numpy())
 
-        loss, grads = self.loss_and_grad_fn(
+        _, grads = self.loss_and_grad_fn(
             td_target,
             observations,
             actions,
