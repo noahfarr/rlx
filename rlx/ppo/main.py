@@ -5,15 +5,14 @@ import time
 
 import gymnasium as gym
 import numpy as np
-import tyro
 
 import mlx.core as mx
 import mlx.optimizers as optim
 import mlx.nn as nn
 
-from rlx.common.mlp import MLP
 from rlx.ppo.ppo import PPO
 import rlx.ppo.hyperparameters as h
+from rlx.common.rollout_buffer import RolloutBuffer
 
 
 def parse_args():
@@ -63,6 +62,73 @@ def make_env(env_id):
     return thunk
 
 
+class Actor(nn.Module):
+    def __init__(
+        self,
+        num_layers: int,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        activations: str,
+    ):
+        super().__init__()
+        layer_sizes = [input_dim] + [hidden_dim] * num_layers + [output_dim]
+        self.layers = [
+            nn.Linear(idim, odim)
+            for idim, odim in zip(layer_sizes[:-1], layer_sizes[1:])
+        ]
+        self.activations = activations
+        assert (
+            len(self.layers) == len(self.activations) + 1
+        ), "Number of layers and activations should match"
+
+    def __call__(self, x):
+        for layer, activation in zip(self.layers[:-1], self.activations):
+            x = activation(layer(x))
+        x = self.layers[-1](x)
+        return x
+
+
+class Critic(nn.Module):
+    def __init__(
+        self,
+        num_layers: int,
+        input_dim: int,
+        hidden_dim: int,
+        activations: str,
+    ):
+        super().__init__()
+        layer_sizes = [input_dim] + [hidden_dim] * num_layers + [1]
+        self.layers = [
+            nn.Linear(idim, odim)
+            for idim, odim in zip(layer_sizes[:-1], layer_sizes[1:])
+        ]
+        self.activations = activations
+        assert (
+            len(self.layers) == len(self.activations) + 1
+        ), "Number of layers and activations should match"
+
+    def __call__(self, x):
+        for layer, activation in zip(self.layers[:-1], self.activations):
+            x = activation(layer(x))
+        x = self.layers[-1](x)
+        return x
+
+
+def anneal_lr(actor_optim, critic_optim, iteration, num_iterations, learning_rate):
+    frac = 1.0 - (iteration - 1.0) / num_iterations
+    new_lr = frac * learning_rate
+
+    actor_optim_state = actor_optim.state
+    critic_optim_state = critic_optim.state
+
+    actor_optim = optim.Adam(learning_rate=new_lr, eps=1e-5)
+    critic_optim = optim.Adam(learning_rate=new_lr, eps=1e-5)
+
+    actor_optim.state = actor_optim_state
+    critic_optim.state = critic_optim_state
+
+
 if __name__ == "__main__":
     args = parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
@@ -78,7 +144,7 @@ if __name__ == "__main__":
         [make_env(args.env_id) for i in range(args.num_envs)],
     )
 
-    actor = MLP(
+    actor = Actor(
         num_layers=2,
         input_dim=np.array(envs.single_observation_space.shape).prod(),
         hidden_dim=64,
@@ -89,11 +155,10 @@ if __name__ == "__main__":
 
     actor_optimizer = optim.Adam(learning_rate=args.learning_rate, eps=1e-5)
 
-    critic = MLP(
+    critic = Critic(
         num_layers=2,
         input_dim=np.array(envs.single_observation_space.shape).prod(),
         hidden_dim=64,
-        output_dim=1,
         activations=[nn.Tanh(), nn.Tanh()],
     )
     mx.eval(critic.parameters())
@@ -107,15 +172,7 @@ if __name__ == "__main__":
         critic_optimizer=critic_optimizer,
     )
 
-    # ALGO Logic: Storage setup
-    obs = mx.zeros(
-        (args.num_steps, args.num_envs) + envs.single_observation_space.shape
-    )
-    actions = mx.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape)
-    log_probs = mx.zeros((args.num_steps, args.num_envs))
-    rewards = mx.zeros((args.num_steps, args.num_envs))
-    dones = mx.zeros((args.num_steps, args.num_envs))
-    values = mx.zeros((args.num_steps, args.num_envs))
+    rollout_buffer = RolloutBuffer()
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -125,26 +182,40 @@ if __name__ == "__main__":
     next_done = mx.zeros(args.num_envs)
 
     for iteration in range(1, args.num_iterations + 1):
+        rollout_buffer.clear()
+
+        if args.anneal_lr:
+            anneal_lr(
+                actor_optimizer,
+                critic_optimizer,
+                iteration,
+                args.num_iterations,
+                args.learning_rate,
+            )
+
         for step in range(0, args.num_steps):
             global_step += args.num_envs
-            obs[step] = next_obs
-            dones[step] = next_done
 
             # ALGO LOGIC: action logic
             action = agent.get_action(next_obs)
             log_prob = agent.get_log_prob(next_obs, action)
             value = agent.get_value(next_obs)
-            values[step] = value.flatten()
-            actions[step] = action
-            log_probs[step] = log_prob
+            rollout_buffer.add(
+                obs=next_obs,
+                action=action,
+                log_prob=log_prob,
+                value=value.flatten(),
+                done=next_done,
+            )
 
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, terminations, truncations, infos = envs.step(
                 np.array(action)
             )
+            rollout_buffer.add(reward=reward)
+            next_obs = mx.array(next_obs)
             next_done = np.logical_or(terminations, truncations)
-            rewards[step] = mx.array(reward)
-            next_obs, next_done = mx.array(next_obs), mx.array(next_done)
+            next_done = mx.array(next_done)
 
             if "final_info" in infos:
                 for info in infos["final_info"]:
@@ -155,6 +226,13 @@ if __name__ == "__main__":
 
         # bootstrap value if not done
         next_value = agent.get_value(next_obs).reshape(1, -1)
+
+        observations = rollout_buffer.get("obs")
+        actions = rollout_buffer.get("action")
+        log_probs = rollout_buffer.get("log_prob")
+        rewards = rollout_buffer.get("reward")
+        values = rollout_buffer.get("value")
+        dones = rollout_buffer.get("done")
         advantages = mx.zeros_like(rewards)
         last_gae_lambda = 0
         for t in reversed(range(args.num_steps)):
@@ -174,7 +252,7 @@ if __name__ == "__main__":
         returns = advantages + values
 
         # flatten the batch
-        b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+        b_obs = observations.reshape((-1,) + envs.single_observation_space.shape)
         b_log_probs = log_probs.reshape(-1)
         b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
         b_advantages = advantages.reshape(-1)
