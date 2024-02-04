@@ -53,7 +53,7 @@ class PPO:
         probs = self.get_prob(observations, actions)
         log_probs = mx.log(probs)
         ratios = mx.exp(log_probs - old_log_probs)
-        # entropy = self.get_entropy(probs, log_probs)
+        entropy = self.get_entropy(probs, log_probs)
         loss = mx.minimum(
             ratios * advantages,
             mx.clip(ratios, 1 - 0.2, 1 + 0.2) * advantages,
