@@ -7,7 +7,7 @@ import mlx.core as mx
 import mlx.optimizers as optim
 import numpy as np
 from stable_baselines3.common.buffers import ReplayBuffer
-
+import torch
 
 import rlx.td3.hyperparameters as h
 from rlx.td3.td3 import TD3
@@ -147,6 +147,11 @@ def sample_normal(mean, std, shape=None):
 
 def main():
     args = parse_args()
+
+    mx.random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.random.manual_seed(args.seed)
+
     envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed)])
     assert isinstance(
         envs.single_action_space, gym.spaces.Box
