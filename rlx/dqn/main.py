@@ -118,6 +118,7 @@ def main():
 
     random.seed(args.seed)
     np.random.seed(args.seed)
+    mx.random.seed(args.seed)
 
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, seed + 1) for seed in range(args.num_envs)]
@@ -152,6 +153,7 @@ def main():
         optimizer=optimizer,
     )
 
+    # TODO: Implement custom replay buffer
     replay_buffer = ReplayBuffer(
         args.buffer_size,
         envs.single_observation_space,

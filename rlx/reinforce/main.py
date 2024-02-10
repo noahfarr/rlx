@@ -69,6 +69,10 @@ class Policy(nn.Module):
 
 def main():
     args = parse_args()
+
+    np.random.seed(args.seed)
+    mx.random.seed(args.seed)
+
     env = gym.make(
         id=args.env_id,
         render_mode=args.render,

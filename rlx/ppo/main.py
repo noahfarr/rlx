@@ -138,10 +138,16 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
+    mx.random.seed(args.seed)
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id) for i in range(args.num_envs)],
+    )
+    assert isinstance(
+        envs.single_observation_space,
+        gym.spaces.Discrete,
+        "Only discrete action spaces are supported",
     )
 
     actor = Actor(
