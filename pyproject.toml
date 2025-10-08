@@ -1,16 +1,14 @@
-[tool.poetry]
+[project]
 name = "rlx"
 version = "0.1.0"
-description = "A reinforcement learning framework based on MLX"
-authors = ["Noah Farr <login@noahfarr.com>"]
+description = "Add your description here"
 readme = "README.md"
-
-[tool.poetry.dependencies]
-python = "^3.11"
-mlx = "^0.2.0"
-gymnasium = {extras = ["classic-control"], version = "^0.29.1"}
-
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires-python = ">=3.11"
+dependencies = [
+    "gymnasium>=1.2.1",
+    "mlx[cpu]>=0.29.2",
+    "stable-baselines3>=2.7.0",
+    "tensorboard>=2.20.0",
+    "tyro>=0.9.32",
+    "wandb>=0.22.2",
+]
