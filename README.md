@@ -4,8 +4,8 @@ RLX is a collection of Reinforcement Learning algorithms implemented based on th
 
 ## Prerequisites
 
-- Python 3.9 or later
-- Poetry for dependency management
+- Python 3.11 (or later minor release)
+- [uv](https://github.com/astral-sh/uv) for dependency management
 - An Apple device with an M-series chip
 
 ## Installation
@@ -17,28 +17,30 @@ git clone https://github.com/noahfarr/rlx.git
 cd rlx
 ```
 
-Install dependencies using Poetry:
+Install dependencies with uv:
 ```bash
-poetry install
+uv sync
 ```
 
 ## Structure
 
-The project is organized into directories by algorithm. Each directory contains the implementation of a specific Reinforcement Learning algorithm, making the project modular and scalable. Here's an overview:
+The project is organized into directories by algorithm. Each directory contains the implementation of a specific reinforcement learning algorithm, keeping experiments modular and easy to extend:
 
-- alg1/: Implementation of Algorithm 1
-- alg2/: Implementation of Algorithm 2
-...
+- `rlx/dqn/` — Deep Q-Network implementation and defaults
+- `rlx/ppo/` — Proximal Policy Optimization implementation and defaults
+- `rlx/sac/` — Soft Actor-Critic implementation and defaults
+- `rlx/common/` — Shared utilities (buffers, rollout helpers, etc.)
+- `rlx/utils/` — Auxiliary tooling used across algorithms
 
 ## Usage
 
-To run a specific algorithm, navigate to its directory and execute the main script. For example:
+Use `uv run` to execute any of the experiment entry points. For example, to launch DQN with the default hyperparameters:
 
 ```bash
-cd alg1
-poetry run python main.py
+uv run python rlx/dqn/main.py
 ```
-Replace alg1 with the directory of the algorithm you wish to run.
+
+Add `--help` to inspect the available CLI options on any algorithm entry point.
 
 ## Contributing
 
