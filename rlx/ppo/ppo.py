@@ -32,8 +32,11 @@ class PPO:
         log_probs = mx.log(probs)
         return log_probs
 
-    def get_entropy(self, probs, log_probs):
-        entropy = -mx.sum(probs * log_probs)
+    def get_entropy(self, observations):
+        logits = self.actor(observations)
+        probs = nn.softmax(logits)
+        log_probs = nn.log_softmax(logits)
+        entropy = -mx.sum(probs * log_probs, axis=1)
         return entropy
 
     def get_approx_kl(self, observations, actions, old_log_probs):
@@ -53,7 +56,7 @@ class PPO:
         probs = self.get_prob(observations, actions)
         log_probs = mx.log(probs)
         ratios = mx.exp(log_probs - old_log_probs)
-        entropy = self.get_entropy(probs, log_probs)
+        entropy = self.get_entropy(observations)
         loss = mx.minimum(
             ratios * advantages,
             mx.clip(ratios, 1 - 0.2, 1 + 0.2) * advantages,
