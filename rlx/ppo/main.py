@@ -145,10 +145,9 @@ if __name__ == "__main__":
         [make_env(args.env_id) for i in range(args.num_envs)],
     )
     assert isinstance(
-        envs.single_observation_space,
+        envs.single_action_space,
         gym.spaces.Discrete,
-        "Only discrete action spaces are supported",
-    )
+    ), "Only discrete action spaces are supported"
 
     actor = Actor(
         num_layers=2,
