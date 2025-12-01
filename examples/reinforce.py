@@ -1,5 +1,4 @@
 from functools import partial
-import os
 import random
 import time
 
@@ -11,8 +10,8 @@ import numpy as np
 import tyro
 from torch.utils.tensorboard import SummaryWriter
 
-from rlx.dqn import DQNConfig, DQN
-from rlx.buffers.replay_buffer import ReplayBuffer
+from rlx.reinforce import REINFORCEConfig, REINFORCE
+from rlx.buffers.rollout_buffer import RolloutBuffer
 
 
 def make_env(env_id, seed, idx, capture_video, run_name):
@@ -30,12 +29,7 @@ def make_env(env_id, seed, idx, capture_video, run_name):
     return thunk
 
 
-def linear_schedule(start_e: float, end_e: float, duration: float, t: int):
-    slope = (end_e - start_e) / duration
-    return max(slope * t + start_e, end_e)
-
-
-class QNetwork(nn.Module):
+class ActorNetwork(nn.Module):
     def __init__(self, envs):
         super().__init__()
         self.network = nn.Sequential(
@@ -51,7 +45,7 @@ class QNetwork(nn.Module):
 
 
 if __name__ == "__main__":
-    config = tyro.cli(DQNConfig)
+    config = tyro.cli(REINFORCEConfig)
     run_name = f"{config.env_id}__{config.exp_name}__{config.seed}__{int(time.time())}"
     if config.track:
         import wandb
@@ -88,32 +82,22 @@ if __name__ == "__main__":
         envs.single_action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
 
-    q_network = QNetwork(envs)
-    mx.eval(q_network.parameters())
+    actor_network = ActorNetwork(envs)
+    mx.eval(actor_network.parameters())
     optimizer = optim.Adam(learning_rate=config.learning_rate)
-    target_network = QNetwork(envs).update(q_network.parameters())
 
-    buffer = ReplayBuffer(
-        config.buffer_size,
+    buffer = RolloutBuffer(
+        500,
         envs.single_observation_space,
         envs.single_action_space,
         n_envs=config.num_envs,
     )
-
-    epsilon_schedule = partial(
-        linear_schedule,
-        start_e=config.start_e,
-        end_e=config.end_e,
-        duration=config.exploration_fraction * config.total_timesteps,
-    )
-    algorithm = DQN(
+    algorithm = REINFORCE(
         config=config,
         envs=envs,
-        q_network=q_network,
-        target_network=target_network,
+        actor_network=actor_network,
         optimizer=optimizer,
         buffer=buffer,
-        epsilon_schedule=epsilon_schedule,
     )
 
     def callback(info, step):
