@@ -19,10 +19,10 @@ class RolloutBuffer:
         observation_space: gym.Space,
         action_space: gym.Space,
         gamma: float = 0.99,
-        n_envs: int = 1,
+        num_envs: int = 1,
     ):
         self.buffer_size = buffer_size
-        self.n_envs = n_envs
+        self.num_envs = num_envs
         self.observation_space = observation_space
         self.action_space = action_space
         self.gamma = gamma
@@ -38,31 +38,31 @@ class RolloutBuffer:
 
     def reset(self):
         self.observations = mx.zeros(
-            (self.buffer_size, self.n_envs, *self.observation_space.shape),
+            (self.buffer_size, self.num_envs, *self.observation_space.shape),
             dtype=mx.float32,
         )
         self.next_observations = mx.zeros(
-            (self.buffer_size, self.n_envs, *self.observation_space.shape),
+            (self.buffer_size, self.num_envs, *self.observation_space.shape),
             dtype=mx.float32,
         )
         self.actions = mx.zeros(
-            (self.buffer_size, self.n_envs, *self.action_space.shape),
+            (self.buffer_size, self.num_envs, *self.action_space.shape),
             dtype=self.action_dtype,
         )
-        self.rewards = mx.zeros((self.buffer_size, self.n_envs), dtype=mx.float32)
-        self.returns = mx.zeros((self.buffer_size, self.n_envs), dtype=mx.float32)
-        self.terminations = mx.zeros((self.buffer_size, self.n_envs), dtype=mx.float32)
-        self.truncations = mx.zeros((self.buffer_size, self.n_envs), dtype=mx.float32)
-        self.values = mx.zeros((self.buffer_size, self.n_envs), dtype=mx.float32)
-        self.log_probs = mx.zeros((self.buffer_size, self.n_envs), dtype=mx.float32)
-        self.advantages = mx.zeros((self.buffer_size, self.n_envs), dtype=mx.float32)
-        self.pos = 0
+        self.rewards = mx.zeros((self.buffer_size, self.num_envs), dtype=mx.float32)
+        self.returns = mx.zeros((self.buffer_size, self.num_envs), dtype=mx.float32)
+        self.terminations = mx.zeros((self.buffer_size, self.num_envs), dtype=mx.float32)
+        self.truncations = mx.zeros((self.buffer_size, self.num_envs), dtype=mx.float32)
+        self.values = mx.zeros((self.buffer_size, self.num_envs), dtype=mx.float32)
+        self.log_probs = mx.zeros((self.buffer_size, self.num_envs), dtype=mx.float32)
+        self.advantages = mx.zeros((self.buffer_size, self.num_envs), dtype=mx.float32)
+        self.position = 0
         self.full = False
 
     def add(
         self,
-        obs: mx.array,
-        next_obs: mx.array,
+        observation: mx.array,
+        next_observation: mx.array,
         action: mx.array,
         reward: mx.array,
         terminated: mx.array,
@@ -70,17 +70,17 @@ class RolloutBuffer:
         value: Optional[mx.array] = None,
         log_prob: Optional[mx.array] = None,
     ):
-        self.observations[self.pos] = mx.array(obs)
-        self.next_observations[self.pos] = mx.array(next_obs)
-        self.actions[self.pos] = mx.array(action)
-        self.rewards[self.pos] = mx.array(reward)
-        self.terminations[self.pos] = mx.array(terminated)
-        self.truncations[self.pos] = mx.array(truncated)
+        self.observations[self.position] = mx.array(observation)
+        self.next_observations[self.position] = mx.array(next_observation)
+        self.actions[self.position] = mx.array(action)
+        self.rewards[self.position] = mx.array(reward)
+        self.terminations[self.position] = mx.array(terminated)
+        self.truncations[self.position] = mx.array(truncated)
         if value is not None:
-            self.values[self.pos] = value.flatten()
+            self.values[self.position] = value.flatten()
         if log_prob is not None:
-            self.log_probs[self.pos] = log_prob.flatten()
+            self.log_probs[self.position] = log_prob.flatten()
 
-        self.pos += 1
-        if self.pos == self.buffer_size:
+        self.position += 1
+        if self.position == self.buffer_size:
             self.full = True
