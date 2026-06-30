@@ -23,8 +23,8 @@ classifiers = [
 dependencies = [
     "envpool>=1.2.5",
     "gymnasium>=1.2.1",
-    "mlx>=0.29.2; platform_system == 'Darwin'",
-    "mlx[cuda]>=0.29.2; platform_system == 'Linux'",
+    "mlx>=0.29.4; platform_system == 'Darwin'",
+    "mlx[cuda]>=0.29.4; platform_system == 'Linux'",
     "tensorboard>=2.20.0",
     "torch>=2.2.0",
     "tyro>=0.9.32",
