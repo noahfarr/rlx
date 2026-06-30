@@ -1,16 +1,44 @@
-[tool.poetry]
+[project]
 name = "rlx"
-version = "0.1.0"
-description = "A reinforcement learning framework based on MLX"
-authors = ["Noah Farr <login@noahfarr.com>"]
+version = "1.0.0"
+description = "Reinforcement learning algorithms implemented in Apple MLX"
 readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Noah Farr", email = "login@noahfarr.com" }]
+keywords = ["reinforcement-learning", "mlx", "deep-learning", "gymnasium", "rl"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "envpool>=1.2.5",
+    "gymnasium>=1.2.1",
+    "mlx>=0.29.4; platform_system == 'Darwin'",
+    "mlx[cuda]>=0.29.4; platform_system == 'Linux'",
+    "tensorboard>=2.20.0",
+    "torch>=2.2.0",
+    "tyro>=0.9.32",
+    "wandb>=0.22.2",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-mlx = "^0.2.0"
-gymnasium = {extras = ["classic-control"], version = "^0.29.1"}
-
+[project.urls]
+Homepage = "https://github.com/noahfarr/rlx"
+Repository = "https://github.com/noahfarr/rlx"
+Issues = "https://github.com/noahfarr/rlx/issues"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rlx"]

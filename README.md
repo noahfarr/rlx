@@ -1,60 +1,67 @@
-# RLX: Reinforcement Learning with MLX
+# RLX, Reinforcement Learning with MLX
 
-RLX is a collection of Reinforcement Learning algorithms implemented based on the implementations from CleanRL in MLX, Apple's new Machine Learning framework. This project aims to leverage the unified memory capabilities of Apple's M series chips to enhance the performance and efficiency of these algorithms.
+RLX is a collection of Reinforcement Learning algorithms implemented in [MLX](https://github.com/ml-explore/mlx), Apple's array framework. Algorithms follow the single-file, CleanRL-style philosophy, run their environments and learners entirely on device, and use `mx.compile` on the update step to fuse the training graph. On Apple silicon the bundled MLX environments reach well over a million environment steps per second.
+
+## Algorithms
+
+| Algorithm | File | Action space |
+| --- | --- | --- |
+| DQN | `rlx/algorithms/dqn.py` | discrete |
+| REINFORCE | `rlx/algorithms/reinforce.py` | discrete |
+| A2C | `rlx/algorithms/a2c.py` | discrete |
+| PPO | `rlx/algorithms/ppo.py` | discrete and continuous |
+| SAC | `rlx/algorithms/sac.py` | continuous |
+| TD3 | `rlx/algorithms/td3.py` | continuous |
 
 ## Prerequisites
 
-- Python 3.9 or later
-- Poetry for dependency management
-- An Apple device with an M-series chip
+- Python 3.11 or later
+- [uv](https://github.com/astral-sh/uv) for dependency management
+- macOS on Apple silicon (Metal) or Linux (CUDA), and the correct MLX backend is selected automatically
 
 ## Installation
-
-Clone the repository to your local machine:
 
 ```bash
 git clone https://github.com/noahfarr/rlx.git
 cd rlx
+uv sync
 ```
 
-Install dependencies using Poetry:
-```bash
-poetry install
-```
+## Project structure
 
-## Structure
-
-The project is organized into directories by algorithm. Each directory contains the implementation of a specific Reinforcement Learning algorithm, making the project modular and scalable. Here's an overview:
-
-- alg1/: Implementation of Algorithm 1
-- alg2/: Implementation of Algorithm 2
-...
+- `rlx/algorithms/` holds the algorithm implementations (`DQN`, `REINFORCE`, `A2C`, `PPO`, `SAC`, `TD3`) and their configs
+- `rlx/environments/` holds the vectorized MLX-native `CartPole`, the `Environment` interface, and the `EnvPool` adapter
+- `rlx/buffers/` holds `RolloutBuffer` for on-policy and `ReplayBuffer` for off-policy
+- `rlx/utils/` holds action distributions, the `Logger`, and shared helpers like GAE, returns, and `soft_update`
+- `examples/` holds a runnable training script per algorithm
 
 ## Usage
 
-To run a specific algorithm, navigate to its directory and execute the main script. For example:
+Each algorithm has a runnable example wired with a [tyro](https://github.com/brentyi/tyro) CLI.
 
 ```bash
-cd alg1
-poetry run python main.py
+uv run examples/ppo_cartpole.py
+uv run examples/sac_pendulum.py
+uv run examples/ppo_cartpole.py --ppo.num-envs 8192 --ppo.num-steps 16
 ```
-Replace alg1 with the directory of the algorithm you wish to run.
+
+Experiment level flags such as `--env-id`, `--seed`, `--total-timesteps`, and `--learning-rate` live on the example. Algorithm hyperparameters are nested under the algorithm name, for example `--ppo.gamma` or `--sac.tau`. Add `--help` to any example to see all options.
+
+## Importing as a library
+
+```python
+from rlx import PPO, PPOConfig
+from rlx.environments import CartPole
+```
 
 ## Contributing
 
-Contributions to RLX are welcome. To contribute, please follow these steps:
-
-1. Fork the repository.
-2. Create a new branch for your feature (git checkout -b feature/AmazingFeature).
-3. Commit your changes (git commit -m 'Add some AmazingFeature').
-4. Push to the branch (git push origin feature/AmazingFeature).
-5. Open a pull request.
+Contributions are welcome. Fork the repository, create a branch, commit your changes, and open a pull request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT, and the full text is in the LICENSE file.
 
 ## Acknowledgments
 
-Special thanks to the MLX team for providing the framework.
-This project is designed to run optimally on Apple's M series chips.
+Thanks to the MLX team for the framework and to CleanRL for the reference implementations this project draws on.
