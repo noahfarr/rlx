@@ -37,8 +37,12 @@ class REINFORCE:
         assert (
             self.buffer.buffer_size >= self.config.num_steps
         ), "buffer_size must be at least num_steps to store a full rollout"
-        self._reset = mx.vmap(self.env.reset)
-        self._step = mx.vmap(self.env.step)
+        if getattr(self.env, "vectorized", False):
+            self._reset = self.env.reset
+            self._step = self.env.step
+        else:
+            self._reset = mx.vmap(self.env.reset)
+            self._step = mx.vmap(self.env.step)
         state = [self.actor_network.state, self.optimizer.state]
         self.update_step = mx.compile(self.update_step, inputs=state, outputs=state)
 

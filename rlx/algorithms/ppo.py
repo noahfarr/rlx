@@ -39,8 +39,12 @@ class PPO:
     step: int = 0
 
     def __post_init__(self):
-        self._reset = mx.vmap(self.env.reset)
-        self._step = mx.vmap(self.env.step)
+        if getattr(self.env, "vectorized", False):
+            self._reset = self.env.reset
+            self._step = self.env.step
+        else:
+            self._reset = mx.vmap(self.env.reset)
+            self._step = mx.vmap(self.env.step)
         state = [self.network.state, self.optimizer.state]
         self.update_step = mx.compile(self.update_step, inputs=state, outputs=state)
 
