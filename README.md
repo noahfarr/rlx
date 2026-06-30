@@ -1,62 +1,67 @@
-# RLX: Reinforcement Learning with MLX
+# RLX, Reinforcement Learning with MLX
 
-RLX is a collection of Reinforcement Learning algorithms implemented based on the implementations from CleanRL in MLX, Apple's new Machine Learning framework. This project aims to leverage the unified memory capabilities of Apple's M series chips to enhance the performance and efficiency of these algorithms.
+RLX is a collection of Reinforcement Learning algorithms implemented in [MLX](https://github.com/ml-explore/mlx), Apple's array framework. Algorithms follow the single-file, CleanRL-style philosophy, run their environments and learners entirely on device, and use `mx.compile` on the update step to fuse the training graph. On Apple silicon the bundled MLX environments reach well over a million environment steps per second.
+
+## Algorithms
+
+| Algorithm | File | Action space |
+| --- | --- | --- |
+| DQN | `rlx/algorithms/dqn.py` | discrete |
+| REINFORCE | `rlx/algorithms/reinforce.py` | discrete |
+| A2C | `rlx/algorithms/a2c.py` | discrete |
+| PPO | `rlx/algorithms/ppo.py` | discrete and continuous |
+| SAC | `rlx/algorithms/sac.py` | continuous |
+| TD3 | `rlx/algorithms/td3.py` | continuous |
 
 ## Prerequisites
 
-- Python 3.11 (or later minor release)
+- Python 3.11 or later
 - [uv](https://github.com/astral-sh/uv) for dependency management
-- An Apple device with an M-series chip
+- macOS on Apple silicon (Metal) or Linux (CUDA), and the correct MLX backend is selected automatically
 
 ## Installation
-
-Clone the repository to your local machine:
 
 ```bash
 git clone https://github.com/noahfarr/rlx.git
 cd rlx
-```
-
-Install dependencies with uv:
-```bash
 uv sync
 ```
 
-## Structure
+## Project structure
 
-The project is organized into directories by algorithm. Each directory contains the implementation of a specific reinforcement learning algorithm, keeping experiments modular and easy to extend:
-
-- `rlx/dqn/` — Deep Q-Network implementation and defaults
-- `rlx/ppo/` — Proximal Policy Optimization implementation and defaults
-- `rlx/sac/` — Soft Actor-Critic implementation and defaults
-- `rlx/common/` — Shared utilities (buffers, rollout helpers, etc.)
-- `rlx/utils/` — Auxiliary tooling used across algorithms
+- `rlx/algorithms/` holds the algorithm implementations (`DQN`, `REINFORCE`, `A2C`, `PPO`, `SAC`, `TD3`) and their configs
+- `rlx/environments/` holds the vectorized MLX-native `CartPole`, the `Environment` interface, and the `EnvPool` adapter
+- `rlx/buffers/` holds `RolloutBuffer` for on-policy and `ReplayBuffer` for off-policy
+- `rlx/utils/` holds action distributions, the `Logger`, and shared helpers like GAE, returns, and `soft_update`
+- `examples/` holds a runnable training script per algorithm
 
 ## Usage
 
-Use `uv run` to execute any of the experiment entry points. For example, to launch DQN with the default hyperparameters:
+Each algorithm has a runnable example wired with a [tyro](https://github.com/brentyi/tyro) CLI.
 
 ```bash
-uv run python rlx/dqn/main.py
+uv run examples/ppo.py
+uv run examples/sac.py --env-id Pendulum-v1
+uv run examples/ppo.py --ppo.num-envs 8192 --ppo.num-steps 16
 ```
 
-Add `--help` to inspect the available CLI options on any algorithm entry point.
+Experiment level flags such as `--env-id`, `--seed`, `--total-timesteps`, and `--learning-rate` live on the example. Algorithm hyperparameters are nested under the algorithm name, for example `--ppo.gamma` or `--sac.tau`. Add `--help` to any example to see all options.
+
+## Importing as a library
+
+```python
+from rlx import PPO, PPOConfig
+from rlx.environments import CartPole
+```
 
 ## Contributing
 
-Contributions to RLX are welcome. To contribute, please follow these steps:
-
-1. Fork the repository.
-2. Create a new branch for your feature (git checkout -b feature/AmazingFeature).
-3. Commit your changes (git commit -m 'Add some AmazingFeature').
-4. Push to the branch (git push origin feature/AmazingFeature).
-5. Open a pull request.
+Contributions are welcome. Fork the repository, create a branch, commit your changes, and open a pull request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT, and the full text is in the LICENSE file.
 
 ## Acknowledgments
 
-Special thanks to the MLX team for providing the framework.
-This project is designed to run optimally on Apple's M series chips.
+Thanks to the MLX team for the framework and to CleanRL for the reference implementations this project draws on.
