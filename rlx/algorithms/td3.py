@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import gymnasium as gym
+from gymnasium.vector import AutoresetMode
 import numpy as np
 
 import mlx.core as mx
@@ -37,6 +38,10 @@ class TD3:
     step: int = 0
 
     def __post_init__(self):
+        assert (
+            self.envs.metadata.get("autoreset_mode") == AutoresetMode.NEXT_STEP
+        ), "TD3 assumes NEXT_STEP autoreset so the stored next_observation is the true final observation"
+
         self.action_low = mx.array(self.envs.single_action_space.low)
         self.action_high = mx.array(self.envs.single_action_space.high)
 
