@@ -1,5 +1,6 @@
 from rlx.utils.utils import (
     flatten,
+    soft_update,
     compute_completed_episode_mask,
     compute_discounted_returns,
     compute_generalized_advantage_estimate,
@@ -9,6 +10,7 @@ from rlx.utils.logger import Logger
 
 __all__ = [
     "flatten",
+    "soft_update",
     "compute_completed_episode_mask",
     "compute_discounted_returns",
     "compute_generalized_advantage_estimate",

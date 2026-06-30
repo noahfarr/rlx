@@ -1,8 +1,19 @@
 import mlx.core as mx
+import mlx.nn as nn
+from mlx.utils import tree_map
 
 
 def flatten(array: mx.array) -> mx.array:
     return array.reshape(-1, *array.shape[2:])
+
+
+def soft_update(target_network: nn.Module, online_network: nn.Module, tau: float):
+    target_params = tree_map(
+        lambda online, target: tau * online + (1 - tau) * target,
+        online_network.parameters(),
+        target_network.parameters(),
+    )
+    target_network.update(target_params)
 
 
 def compute_completed_episode_mask(dones: mx.array) -> mx.array:
