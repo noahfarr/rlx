@@ -20,11 +20,11 @@ class ReplayBuffer:
         buffer_size: int,
         observation_space: gym.Space,
         action_space: gym.Space,
-        n_envs: int = 1,
+        num_envs: int = 1,
     ):
         self.buffer_size = buffer_size
-        self.n_envs = n_envs
-        self.pos = 0
+        self.num_envs = num_envs
+        self.position = 0
         self.full = False
 
         action_dtype = (
@@ -32,58 +32,58 @@ class ReplayBuffer:
         )
 
         self.observations = np.zeros(
-            (buffer_size, n_envs, *observation_space.shape), dtype=np.float32
+            (buffer_size, num_envs, *observation_space.shape), dtype=np.float32
         )
         self.actions = np.zeros(
-            (buffer_size, n_envs, *action_space.shape), dtype=action_dtype
+            (buffer_size, num_envs, *action_space.shape), dtype=action_dtype
         )
         self.next_observations = np.zeros(
-            (buffer_size, n_envs, *observation_space.shape), dtype=np.float32
+            (buffer_size, num_envs, *observation_space.shape), dtype=np.float32
         )
-        self.rewards = np.zeros((buffer_size, n_envs), dtype=np.float32)
-        self.terminations = np.zeros((buffer_size, n_envs), dtype=np.float32)
-        self.truncations = np.zeros((buffer_size, n_envs), dtype=np.float32)
+        self.rewards = np.zeros((buffer_size, num_envs), dtype=np.float32)
+        self.terminations = np.zeros((buffer_size, num_envs), dtype=np.float32)
+        self.truncations = np.zeros((buffer_size, num_envs), dtype=np.float32)
 
     def add(
         self,
-        obs: np.ndarray,
-        next_obs: np.ndarray,
+        observation: np.ndarray,
+        next_observation: np.ndarray,
         action: np.ndarray,
         reward: np.ndarray,
         terminated: np.ndarray,
         truncated: np.ndarray,
     ):
-        self.observations[self.pos] = np.array(obs).copy()
-        self.next_observations[self.pos] = np.array(next_obs).copy()
-        self.actions[self.pos] = np.array(action).copy()
-        self.rewards[self.pos] = np.array(reward).copy()
-        self.truncations[self.pos] = np.array(truncated).copy()
-        self.terminations[self.pos] = np.array(terminated).copy()
+        self.observations[self.position] = np.array(observation).copy()
+        self.next_observations[self.position] = np.array(next_observation).copy()
+        self.actions[self.position] = np.array(action).copy()
+        self.rewards[self.position] = np.array(reward).copy()
+        self.truncations[self.position] = np.array(truncated).copy()
+        self.terminations[self.position] = np.array(terminated).copy()
 
-        self.pos += 1
+        self.position += 1
 
-        if self.pos == self.buffer_size:
+        if self.position == self.buffer_size:
             self.full = True
-            self.pos = 0
+            self.position = 0
 
     def sample(self, batch_size: int) -> Batch:
-        upper_bound = self.buffer_size if self.full else self.pos
-        batch_inds = np.random.randint(0, upper_bound, size=batch_size)
+        upper_bound = self.buffer_size if self.full else self.position
+        batch_indices = np.random.randint(0, upper_bound, size=batch_size)
 
-        env_indices = np.random.randint(0, self.n_envs, size=batch_size)
+        env_indices = np.random.randint(0, self.num_envs, size=batch_size)
 
-        b_obs = self.observations[batch_inds, env_indices]
-        b_actions = self.actions[batch_inds, env_indices]
-        b_next_obs = self.next_observations[batch_inds, env_indices]
-        b_rewards = self.rewards[batch_inds, env_indices]
-        b_terminations = self.terminations[batch_inds, env_indices]
-        b_truncations = self.truncations[batch_inds, env_indices]
+        batch_observations = self.observations[batch_indices, env_indices]
+        batch_actions = self.actions[batch_indices, env_indices]
+        batch_next_observations = self.next_observations[batch_indices, env_indices]
+        batch_rewards = self.rewards[batch_indices, env_indices]
+        batch_terminations = self.terminations[batch_indices, env_indices]
+        batch_truncations = self.truncations[batch_indices, env_indices]
 
         return Batch(
-            observations=mx.array(b_obs),
-            actions=mx.array(b_actions),
-            next_observations=mx.array(b_next_obs),
-            rewards=mx.array(b_rewards.reshape(-1, 1)),
-            terminations=mx.array(b_terminations.reshape(-1, 1)),
-            truncations=mx.array(b_truncations.reshape(-1, 1)),
+            observations=mx.array(batch_observations),
+            actions=mx.array(batch_actions),
+            next_observations=mx.array(batch_next_observations),
+            rewards=mx.array(batch_rewards.reshape(-1, 1)),
+            terminations=mx.array(batch_terminations.reshape(-1, 1)),
+            truncations=mx.array(batch_truncations.reshape(-1, 1)),
         )
