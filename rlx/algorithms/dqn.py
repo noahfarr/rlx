@@ -37,6 +37,20 @@ class DQN:
     def __post_init__(self):
         self._reset = mx.vmap(self.env.reset)
         self._step = mx.vmap(self.env.step)
+        state = [self.q_network.state, self.optimizer.state]
+        self.update_step = mx.compile(self.update_step, inputs=state, outputs=state)
+
+    def loss_fn(self, q_network, observations, actions, td_target):
+        q_values = q_network(observations)
+        q_value = mx.take_along_axis(q_values, actions, axis=-1).squeeze()
+        return nn.losses.mse_loss(td_target, q_value)
+
+    def update_step(self, observations, actions, td_target):
+        loss, grads = nn.value_and_grad(self.q_network, self.loss_fn)(
+            self.q_network, observations, actions, td_target
+        )
+        self.optimizer.update(self.q_network, grads)
+        return loss
 
     def reset(self) -> tuple[mx.array, EnvState]:
         self.key, reset_key = mx.random.split(self.key)
@@ -134,15 +148,8 @@ class DQN:
 
                 actions = data.actions.reshape(-1, 1)
 
-                def loss_fn(q_network):
-                    q_values = q_network(data.observations)
-                    q_value = mx.take_along_axis(q_values, actions, axis=-1).squeeze()
-                    loss = nn.losses.mse_loss(td_target, q_value)
-                    return loss
-
-                _, grads = nn.value_and_grad(self.q_network, loss_fn)(self.q_network)
-                self.optimizer.update(self.q_network, grads)
-                mx.eval(self.q_network.parameters(), self.optimizer.state)
+                self.update_step(data.observations, actions, td_target)
+                mx.eval(self.q_network.state, self.optimizer.state)
 
                 if self.step % self.config.target_network_frequency == 0:
                     target_params = tree_map(

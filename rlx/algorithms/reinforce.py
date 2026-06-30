@@ -39,6 +39,23 @@ class REINFORCE:
         ), "buffer_size must be at least num_steps to store a full rollout"
         self._reset = mx.vmap(self.env.reset)
         self._step = mx.vmap(self.env.step)
+        state = [self.actor_network.state, self.optimizer.state]
+        self.update_step = mx.compile(self.update_step, inputs=state, outputs=state)
+
+    def loss_fn(self, actor_network, observations, actions, returns, mask):
+        logits = actor_network(observations)
+        log_probs = nn.log_softmax(logits, axis=-1)
+        log_probs = mx.take_along_axis(
+            log_probs, actions[..., None], axis=-1
+        ).squeeze(-1)
+        return -mx.sum(mask * log_probs * returns) / mx.maximum(mx.sum(mask), 1.0)
+
+    def update_step(self, observations, actions, returns, mask):
+        loss, grads = nn.value_and_grad(self.actor_network, self.loss_fn)(
+            self.actor_network, observations, actions, returns, mask
+        )
+        self.optimizer.update(self.actor_network, grads)
+        return loss
 
     def reset(self) -> tuple[mx.array, EnvState]:
         self.key, reset_key = mx.random.split(self.key)
@@ -118,25 +135,8 @@ class REINFORCE:
             returns = flatten(discounted_returns)
             mask = flatten(mask)
 
-            def loss_fn(actor_network, observations, actions, returns, mask):
-                logits = actor_network(observations)
-                log_probs = nn.log_softmax(logits, axis=-1)
-                log_probs = mx.take_along_axis(
-                    log_probs, actions[..., None], axis=-1
-                ).squeeze(-1)
-                return -mx.sum(mask * log_probs * returns) / mx.maximum(
-                    mx.sum(mask), 1.0
-                )
-
-            _, grads = nn.value_and_grad(self.actor_network, loss_fn)(
-                self.actor_network,
-                observations,
-                actions,
-                returns,
-                mask,
-            )
-            self.optimizer.update(self.actor_network, grads)
-            mx.eval(self.actor_network.parameters(), self.optimizer.state)
+            self.update_step(observations, actions, returns, mask)
+            mx.eval(self.actor_network.state, self.optimizer.state)
 
     def evaluate(self, num_steps: int, callback: Optional[Callable] = None):
         observation, state = self.reset()

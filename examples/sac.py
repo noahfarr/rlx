@@ -76,31 +76,36 @@ class Actor(nn.Module):
         )
 
 
-class QNetwork(nn.Module):
-    def __init__(self, observation_dim, action_dim):
-        super().__init__()
-        self.network = nn.Sequential(
-            nn.Linear(observation_dim + action_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 1),
-        )
-
-    def __call__(self, observation, action):
-        return self.network(mx.concatenate([observation, action], axis=-1))
-
-
 class TwinCritic(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, envs, num_critics=2):
         super().__init__()
         observation_dim = np.array(envs.single_observation_space.shape).prod()
         action_dim = np.array(envs.single_action_space.shape).prod()
-        self.q1 = QNetwork(observation_dim, action_dim)
-        self.q2 = QNetwork(observation_dim, action_dim)
+        input_dim = int(observation_dim + action_dim)
+        self.num_critics = num_critics
+
+        dims = [input_dim, 256, 256, 1]
+        self.layers = []
+        for in_dim, out_dim in zip(dims[:-1], dims[1:]):
+            critics = [nn.Linear(in_dim, out_dim) for _ in range(num_critics)]
+            self.layers.append(
+                {
+                    "weight": mx.stack([critic.weight for critic in critics], axis=0),
+                    "bias": mx.stack([critic.bias for critic in critics], axis=0),
+                }
+            )
 
     def __call__(self, observation, action):
-        return self.q1(observation, action), self.q2(observation, action)
+        x = mx.concatenate([observation, action], axis=-1)
+
+        def forward(layers, x):
+            for index, layer in enumerate(layers):
+                x = x @ layer["weight"].T + layer["bias"]
+                if index < len(layers) - 1:
+                    x = nn.relu(x)
+            return x
+
+        return mx.vmap(forward, in_axes=(0, None))(self.layers, x)
 
 
 if __name__ == "__main__":

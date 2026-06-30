@@ -37,6 +37,8 @@ class A2C:
     def __post_init__(self):
         self._reset = mx.vmap(self.env.reset)
         self._step = mx.vmap(self.env.step)
+        state = [self.network.state, self.optimizer.state]
+        self.update_step = mx.compile(self.update_step, inputs=state, outputs=state)
 
     def reset(self) -> tuple[mx.array, EnvState]:
         self.key, reset_key = mx.random.split(self.key)
@@ -124,42 +126,42 @@ class A2C:
 
             self.update(advantages, returns)
 
+    def loss_fn(self, network, observations, actions, advantages, returns):
+        distribution, values = network(observations)
+        log_probabilities = distribution.log_prob(actions)
+        entropy = distribution.entropy()
+
+        if self.config.normalize_advantages:
+            advantages = (advantages - mx.mean(advantages)) / (
+                mx.std(advantages) + 1e-8
+            )
+
+        policy_loss = -mx.mean(advantages * log_probabilities)
+        value_loss = 0.5 * mx.mean(mx.square(values.squeeze(-1) - returns))
+        entropy_loss = mx.mean(entropy)
+
+        return (
+            policy_loss
+            - self.config.entropy_coefficient * entropy_loss
+            + self.config.value_coefficient * value_loss
+        )
+
+    def update_step(self, observations, actions, advantages, returns):
+        loss, grads = nn.value_and_grad(self.network, self.loss_fn)(
+            self.network, observations, actions, advantages, returns
+        )
+        grads, _ = optim.clip_grad_norm(grads, self.config.max_grad_norm)
+        self.optimizer.update(self.network, grads)
+        return loss
+
     def update(self, advantages: mx.array, returns: mx.array):
         observations = flatten(self.buffer.observations)
         actions = flatten(self.buffer.actions)
         advantages = flatten(advantages)
         returns = flatten(returns)
 
-        def loss_fn(network, observations, actions, advantages, returns):
-            distribution, values = network(observations)
-            log_probabilities = distribution.log_prob(actions)
-            entropy = distribution.entropy()
-
-            if self.config.normalize_advantages:
-                advantages = (advantages - mx.mean(advantages)) / (
-                    mx.std(advantages) + 1e-8
-                )
-
-            policy_loss = -mx.mean(advantages * log_probabilities)
-            value_loss = 0.5 * mx.mean(mx.square(values.squeeze(-1) - returns))
-            entropy_loss = mx.mean(entropy)
-
-            return (
-                policy_loss
-                - self.config.entropy_coefficient * entropy_loss
-                + self.config.value_coefficient * value_loss
-            )
-
-        _, grads = nn.value_and_grad(self.network, loss_fn)(
-            self.network,
-            observations,
-            actions,
-            advantages,
-            returns,
-        )
-        grads, _ = optim.clip_grad_norm(grads, self.config.max_grad_norm)
-        self.optimizer.update(self.network, grads)
-        mx.eval(self.network.parameters(), self.optimizer.state)
+        self.update_step(observations, actions, advantages, returns)
+        mx.eval(self.network.state, self.optimizer.state)
 
     def evaluate(self, num_steps: int, callback: Optional[Callable] = None):
         observation, state = self.reset()

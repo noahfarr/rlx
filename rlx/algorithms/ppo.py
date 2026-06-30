@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from functools import partial
 from typing import Callable, Optional
 
 import numpy as np
@@ -42,7 +41,8 @@ class PPO:
     def __post_init__(self):
         self._reset = mx.vmap(self.env.reset)
         self._step = mx.vmap(self.env.step)
-        self._update_minibatch = self._build_update_minibatch()
+        state = [self.network.state, self.optimizer.state]
+        self.update_step = mx.compile(self.update_step, inputs=state, outputs=state)
 
     def reset(self) -> tuple[mx.array, EnvState]:
         self.key, reset_key = mx.random.split(self.key)
@@ -132,88 +132,83 @@ class PPO:
 
             self.update(advantages, returns)
 
-    def _build_update_minibatch(self):
-        def loss_fn(
-            network,
+    def loss_fn(
+        self,
+        network,
+        observations,
+        actions,
+        old_log_probabilities,
+        old_values,
+        advantages,
+        returns,
+    ):
+        distribution, new_values = network(observations)
+        new_log_probabilities = distribution.log_prob(actions)
+        entropy = distribution.entropy()
+
+        log_ratio = new_log_probabilities - old_log_probabilities
+        ratio = mx.exp(log_ratio)
+
+        if self.config.normalize_advantages:
+            advantages = (advantages - mx.mean(advantages)) / (
+                mx.std(advantages) + 1e-8
+            )
+
+        policy_loss = mx.maximum(
+            -advantages * ratio,
+            -advantages
+            * mx.clip(
+                ratio,
+                1 - self.config.clip_coefficient,
+                1 + self.config.clip_coefficient,
+            ),
+        )
+        policy_loss = mx.mean(policy_loss)
+
+        new_values = new_values.squeeze(-1)
+        if self.config.clip_value_loss:
+            value_loss_unclipped = mx.square(new_values - returns)
+            clipped_values = old_values + mx.clip(
+                new_values - old_values,
+                -self.config.clip_coefficient,
+                self.config.clip_coefficient,
+            )
+            value_loss_clipped = mx.square(clipped_values - returns)
+            value_loss = 0.5 * mx.mean(
+                mx.maximum(value_loss_unclipped, value_loss_clipped)
+            )
+        else:
+            value_loss = 0.5 * mx.mean(mx.square(new_values - returns))
+
+        entropy_loss = mx.mean(entropy)
+
+        return (
+            policy_loss
+            - self.config.entropy_coefficient * entropy_loss
+            + self.config.value_coefficient * value_loss
+        )
+
+    def update_step(
+        self,
+        observations,
+        actions,
+        old_log_probabilities,
+        old_values,
+        advantages,
+        returns,
+    ):
+        loss, grads = nn.value_and_grad(self.network, self.loss_fn)(
+            self.network,
             observations,
             actions,
             old_log_probabilities,
             old_values,
             advantages,
             returns,
-        ):
-            distribution, new_values = network(observations)
-            new_log_probabilities = distribution.log_prob(actions)
-            entropy = distribution.entropy()
-
-            log_ratio = new_log_probabilities - old_log_probabilities
-            ratio = mx.exp(log_ratio)
-
-            if self.config.normalize_advantages:
-                advantages = (advantages - mx.mean(advantages)) / (
-                    mx.std(advantages) + 1e-8
-                )
-
-            policy_loss = mx.maximum(
-                -advantages * ratio,
-                -advantages
-                * mx.clip(
-                    ratio,
-                    1 - self.config.clip_coefficient,
-                    1 + self.config.clip_coefficient,
-                ),
-            )
-            policy_loss = mx.mean(policy_loss)
-
-            new_values = new_values.squeeze(-1)
-            if self.config.clip_value_loss:
-                value_loss_unclipped = mx.square(new_values - returns)
-                clipped_values = old_values + mx.clip(
-                    new_values - old_values,
-                    -self.config.clip_coefficient,
-                    self.config.clip_coefficient,
-                )
-                value_loss_clipped = mx.square(clipped_values - returns)
-                value_loss = 0.5 * mx.mean(
-                    mx.maximum(value_loss_unclipped, value_loss_clipped)
-                )
-            else:
-                value_loss = 0.5 * mx.mean(mx.square(new_values - returns))
-
-            entropy_loss = mx.mean(entropy)
-
-            return (
-                policy_loss
-                - self.config.entropy_coefficient * entropy_loss
-                + self.config.value_coefficient * value_loss
-            )
-
-        loss_and_grad = nn.value_and_grad(self.network, loss_fn)
-        state = [self.network.state, self.optimizer.state]
-
-        @partial(mx.compile, inputs=state, outputs=state)
-        def update_minibatch(
-            observations,
-            actions,
-            old_log_probabilities,
-            old_values,
-            advantages,
-            returns,
-        ):
-            loss, grads = loss_and_grad(
-                self.network,
-                observations,
-                actions,
-                old_log_probabilities,
-                old_values,
-                advantages,
-                returns,
-            )
-            grads, _ = optim.clip_grad_norm(grads, self.config.max_grad_norm)
-            self.optimizer.update(self.network, grads)
-            return loss
-
-        return update_minibatch
+        )
+        grads, _ = optim.clip_grad_norm(grads, self.config.max_grad_norm)
+        self.optimizer.update(self.network, grads)
+        return loss
 
     def update(self, advantages: mx.array, returns: mx.array):
         observations = flatten(self.buffer.observations)
@@ -232,7 +227,7 @@ class PPO:
                 minibatch_indices = mx.array(
                     permutation[start : start + minibatch_size]
                 )
-                self._update_minibatch(
+                self.update_step(
                     observations[minibatch_indices],
                     actions[minibatch_indices],
                     log_probabilities[minibatch_indices],

@@ -7,7 +7,8 @@ import numpy as np
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
-from mlx.utils import tree_map
+
+from rlx.utils import soft_update
 
 
 @dataclass
@@ -39,6 +40,69 @@ class SAC:
         action_dim = int(np.prod(self.envs.single_action_space.shape))
         self.target_entropy = -float(action_dim)
         self.log_alpha = mx.array(float(np.log(self.config.alpha)))
+
+        self.update_critic = mx.compile(
+            self.update_critic,
+            inputs=[
+                self.critic_network.state,
+                self.critic_optimizer.state,
+                self.actor_network.state,
+                self.target_critic_network.state,
+                mx.random.state,
+            ],
+            outputs=[
+                self.critic_network.state,
+                self.critic_optimizer.state,
+                mx.random.state,
+            ],
+        )
+        self.update_actor = mx.compile(
+            self.update_actor,
+            inputs=[
+                self.actor_network.state,
+                self.actor_optimizer.state,
+                self.critic_network.state,
+                mx.random.state,
+            ],
+            outputs=[
+                self.actor_network.state,
+                self.actor_optimizer.state,
+                mx.random.state,
+            ],
+        )
+
+    def critic_loss_fn(self, critic_network, observations, actions, td_target):
+        q = critic_network(observations, actions)
+        return mx.sum(mx.mean(mx.square(q - td_target), axis=(1, 2)))
+
+    def update_critic(
+        self, observations, actions, next_observations, rewards, terminations, alpha
+    ):
+        next_distribution = self.actor_network(next_observations)
+        next_action, next_log_probability = next_distribution.sample()
+        target_q = self.target_critic_network(next_observations, next_action)
+        min_target_q = mx.min(target_q, axis=0) - alpha * next_log_probability
+        td_target = rewards + self.config.gamma * (1 - terminations) * min_target_q
+
+        loss, grads = nn.value_and_grad(self.critic_network, self.critic_loss_fn)(
+            self.critic_network, observations, actions, td_target
+        )
+        self.critic_optimizer.update(self.critic_network, grads)
+        return loss
+
+    def actor_loss_fn(self, actor_network, observations, alpha):
+        distribution = actor_network(observations)
+        action, log_probability = distribution.sample()
+        q = self.critic_network(observations, action)
+        min_q = mx.min(q, axis=0)
+        return mx.mean(alpha * log_probability - min_q)
+
+    def update_actor(self, observations, alpha):
+        loss, grads = nn.value_and_grad(self.actor_network, self.actor_loss_fn)(
+            self.actor_network, observations, alpha
+        )
+        self.actor_optimizer.update(self.actor_network, grads)
+        return loss
 
     @property
     def alpha(self) -> mx.array:
@@ -83,38 +147,19 @@ class SAC:
         data = self.buffer.sample(self.config.batch_size)
         alpha = self.alpha
 
-        next_distribution = self.actor_network(data.next_observations)
-        next_action, next_log_probability = next_distribution.sample()
-        target_q1, target_q2 = self.target_critic_network(
-            data.next_observations, next_action
+        self.update_critic(
+            data.observations,
+            data.actions,
+            data.next_observations,
+            data.rewards,
+            data.terminations,
+            alpha,
         )
-        min_target_q = mx.minimum(target_q1, target_q2) - alpha * next_log_probability
-        td_target = data.rewards + self.config.gamma * (1 - data.terminations) * min_target_q
-
-        def critic_loss_fn(critic_network):
-            q1, q2 = critic_network(data.observations, data.actions)
-            return nn.losses.mse_loss(q1, td_target) + nn.losses.mse_loss(q2, td_target)
-
-        _, critic_grads = nn.value_and_grad(self.critic_network, critic_loss_fn)(
-            self.critic_network
-        )
-        self.critic_optimizer.update(self.critic_network, critic_grads)
-        mx.eval(self.critic_network.parameters(), self.critic_optimizer.state)
+        mx.eval(self.critic_network.state, self.critic_optimizer.state)
 
         if self.step % self.config.policy_frequency == 0:
-
-            def actor_loss_fn(actor_network):
-                distribution = actor_network(data.observations)
-                action, log_probability = distribution.sample()
-                q1, q2 = self.critic_network(data.observations, action)
-                min_q = mx.minimum(q1, q2)
-                return mx.mean(alpha * log_probability - min_q)
-
-            _, actor_grads = nn.value_and_grad(self.actor_network, actor_loss_fn)(
-                self.actor_network
-            )
-            self.actor_optimizer.update(self.actor_network, actor_grads)
-            mx.eval(self.actor_network.parameters(), self.actor_optimizer.state)
+            self.update_actor(data.observations, alpha)
+            mx.eval(self.actor_network.state, self.actor_optimizer.state)
 
             if self.config.autotune:
                 distribution = self.actor_network(data.observations)
@@ -133,13 +178,9 @@ class SAC:
                 mx.eval(self.log_alpha, self.alpha_optimizer.state)
 
         if self.step % self.config.target_network_frequency == 0:
-            target_params = tree_map(
-                lambda online, target: self.config.tau * online
-                + (1 - self.config.tau) * target,
-                self.critic_network.parameters(),
-                self.target_critic_network.parameters(),
+            soft_update(
+                self.target_critic_network, self.critic_network, self.config.tau
             )
-            self.target_critic_network.update(target_params)
 
     def evaluate(self, num_steps: int, callback: Optional[Callable] = None):
         observation, info = self.envs.reset()
