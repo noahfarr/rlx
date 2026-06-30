@@ -14,7 +14,7 @@ from rlx.algorithms.ppo import PPOConfig, PPO
 from rlx.buffers.rollout_buffer import RolloutBuffer
 from rlx.utils.logger import Logger
 from rlx.utils.distributions import Gaussian
-from rlx.environments.envpool import EnvPoolVectorEnv
+from rlx.environments import EnvPool
 
 
 @dataclass
@@ -41,10 +41,10 @@ class Args:
 
 
 class ContinuousActorCritic(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, env):
         super().__init__()
-        observation_dim = np.array(envs.single_observation_space.shape).prod()
-        action_dim = np.array(envs.single_action_space.shape).prod()
+        observation_dim = np.array(env.observation_space.shape).prod()
+        action_dim = np.array(env.action_space.shape).prod()
         self.actor_mean = nn.Sequential(
             nn.Linear(observation_dim, 64),
             nn.Tanh(),
@@ -96,7 +96,7 @@ if __name__ == "__main__":
     mx.random.seed(args.seed)
 
     # env setup
-    envs = EnvPoolVectorEnv(
+    env = EnvPool(
         args.env_id,
         config.num_envs,
         seed=args.seed,
@@ -105,26 +105,27 @@ if __name__ == "__main__":
         gamma=config.gamma,
     )
     assert isinstance(
-        envs.single_action_space, gym.spaces.Box
+        env.action_space, gym.spaces.Box
     ), "only continuous action space is supported"
 
-    network = ContinuousActorCritic(envs)
+    network = ContinuousActorCritic(env)
     mx.eval(network.parameters())
     optimizer = optim.Adam(learning_rate=args.learning_rate)
 
     buffer = RolloutBuffer(
         config.num_steps,
-        envs.single_observation_space,
-        envs.single_action_space,
+        env.observation_space,
+        env.action_space,
         gamma=config.gamma,
         num_envs=config.num_envs,
     )
     algorithm = PPO(
         config=config,
-        envs=envs,
+        env=env,
         network=network,
         optimizer=optimizer,
         buffer=buffer,
+        key=mx.random.key(args.seed),
     )
 
     logger = Logger()
@@ -132,5 +133,5 @@ if __name__ == "__main__":
     algorithm.train(args.total_timesteps, callback=logger)
     algorithm.evaluate(10_000, callback=logger)
 
-    envs.close()
+    env.close()
     writer.close()

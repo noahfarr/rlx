@@ -28,7 +28,9 @@ class RunningMeanStd:
         self.count = total_count
 
 
-class EnvPoolVectorEnv:
+class EnvPool:
+    vectorized = True
+
     def __init__(
         self,
         env_id,
@@ -50,9 +52,8 @@ class EnvPoolVectorEnv:
                 seed=seed,
                 num_threads=num_threads,
             )
-            self.single_observation_space = self.envs.observation_space
-            self.single_action_space = self.envs.action_space
-            self.action_space = self.envs.action_space
+            self._observation_space = self.envs.observation_space
+            self._action_space = self.envs.action_space
         self.num_envs = num_envs
 
         self.normalize_observations = normalize_observations
@@ -61,11 +62,17 @@ class EnvPoolVectorEnv:
         self.epsilon = epsilon
         self.clip = clip
 
-        self.episode_returns = np.zeros(num_envs, dtype=np.float64)
-        self.episode_lengths = np.zeros(num_envs, dtype=np.int64)
         self.discounted_returns = np.zeros(num_envs, dtype=np.float64)
-        self.observation_rms = RunningMeanStd(self.single_observation_space.shape)
+        self.observation_rms = RunningMeanStd(self._observation_space.shape)
         self.return_rms = RunningMeanStd(())
+
+    @property
+    def observation_space(self):
+        return self._observation_space
+
+    @property
+    def action_space(self):
+        return self._action_space
 
     def normalize_observation(self, observation):
         if not self.normalize_observations:
@@ -76,36 +83,20 @@ class EnvPoolVectorEnv:
         )
         return np.clip(normalized, -self.clip, self.clip).astype(np.float32)
 
-    def reset(self):
+    def reset(self, key=None):
         observation, info = self.envs.reset()
-        self.episode_returns[:] = 0
-        self.episode_lengths[:] = 0
         self.discounted_returns[:] = 0
         return mx.array(self.normalize_observation(observation)), {}
 
-    def step(self, action):
+    def step(self, key, state, action):
         observation, reward, terminated, truncated, info = self.envs.step(
             np.asarray(action)
         )
-        reward = reward.astype(np.float64)
-        done = np.logical_or(terminated, truncated)
-
-        self.episode_returns += reward
-        self.episode_lengths += 1
-
-        out_info = {}
-        if done.any():
-            out_info["episode"] = {
-                "r": np.where(done, self.episode_returns, 0.0),
-                "l": np.where(done, self.episode_lengths, 0),
-            }
-            out_info["_episode"] = done
-            self.episode_returns[done] = 0.0
-            self.episode_lengths[done] = 0
-
         observation = self.normalize_observation(observation)
+        reward = reward.astype(np.float64)
 
         if self.normalize_rewards:
+            done = np.logical_or(terminated, truncated)
             self.discounted_returns = self.discounted_returns * self.gamma + reward
             self.return_rms.update(self.discounted_returns)
             reward = reward / np.sqrt(self.return_rms.var + self.epsilon)
@@ -114,10 +105,11 @@ class EnvPoolVectorEnv:
 
         return (
             mx.array(observation),
+            {},
             mx.array(reward.astype(np.float32)),
-            terminated,
-            truncated,
-            out_info,
+            mx.array(terminated),
+            mx.array(truncated),
+            {},
         )
 
     def close(self):
