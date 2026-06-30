@@ -1,6 +1,6 @@
-from functools import partial
 import random
 import time
+from dataclasses import dataclass, field
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -10,34 +10,33 @@ import numpy as np
 import tyro
 from torch.utils.tensorboard import SummaryWriter
 
-from rlx.reinforce import REINFORCEConfig, REINFORCE
+from rlx.algorithms.reinforce import REINFORCEConfig, REINFORCE
 from rlx.buffers.rollout_buffer import RolloutBuffer
+from rlx.environments import CartPole
+from rlx.utils.logger import Logger
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
-    def thunk():
-        if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        else:
-            env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env.action_space.seed(seed)
-
-        return env
-
-    return thunk
+@dataclass
+class Args:
+    experiment_name: str = "reinforce"
+    seed: int = 1
+    total_timesteps: int = 100_000_000
+    learning_rate: float = 2.5e-4
+    track: bool = False
+    wandb_project_name: str = "rlx"
+    wandb_entity: str = ""
+    reinforce: REINFORCEConfig = field(default_factory=REINFORCEConfig)
 
 
 class ActorNetwork(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, env):
         super().__init__()
         self.network = nn.Sequential(
-            nn.Linear(np.array(envs.single_observation_space.shape).prod(), 120),
+            nn.Linear(np.array(env.observation_space.shape).prod(), 120),
             nn.ReLU(),
             nn.Linear(120, 84),
             nn.ReLU(),
-            nn.Linear(84, envs.single_action_space.n),
+            nn.Linear(84, env.action_space.n),
         )
 
     def __call__(self, x):
@@ -45,16 +44,17 @@ class ActorNetwork(nn.Module):
 
 
 if __name__ == "__main__":
-    config = tyro.cli(REINFORCEConfig)
-    run_name = f"{config.env_id}__{config.exp_name}__{config.seed}__{int(time.time())}"
-    if config.track:
+    args = tyro.cli(Args)
+    config = args.reinforce
+    run_name = f"{args.experiment_name}__{args.seed}__{int(time.time())}"
+    if args.track:
         import wandb
 
         wandb.init(
-            project=config.wandb_project_name,
-            entity=config.wandb_entity,
+            project=args.wandb_project_name,
+            entity=args.wandb_entity,
             sync_tensorboard=True,
-            config=vars(config),
+            config=vars(args),
             name=run_name,
             monitor_gym=True,
             save_code=True,
@@ -66,48 +66,37 @@ if __name__ == "__main__":
         % ("\n".join([f"|{key}|{value}|" for key, value in vars(config).items()])),
     )
 
-    # TRY NOT TO MODIFY: seeding
-    random.seed(config.seed)
-    np.random.seed(config.seed)
-    mx.random.seed(config.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    mx.random.seed(args.seed)
 
-    # env setup
-    envs = gym.vector.SyncVectorEnv(
-        [
-            make_env(config.env_id, config.seed + i, i, config.capture_video, run_name)
-            for i in range(config.num_envs)
-        ]
-    )
+    env = CartPole()
     assert isinstance(
-        envs.single_action_space, gym.spaces.Discrete
+        env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
 
-    actor_network = ActorNetwork(envs)
+    actor_network = ActorNetwork(env)
     mx.eval(actor_network.parameters())
-    optimizer = optim.Adam(learning_rate=config.learning_rate)
+    optimizer = optim.Adam(learning_rate=args.learning_rate)
 
     buffer = RolloutBuffer(
-        500,
-        envs.single_observation_space,
-        envs.single_action_space,
-        n_envs=config.num_envs,
+        config.num_steps,
+        env.observation_space,
+        env.action_space,
+        num_envs=config.num_envs,
     )
     algorithm = REINFORCE(
         config=config,
-        envs=envs,
+        env=env,
         actor_network=actor_network,
         optimizer=optimizer,
         buffer=buffer,
+        key=mx.random.key(args.seed),
     )
 
-    def callback(info, step):
-        if step % 100 == 0:
-            print(info["episode"]["r"])
+    logger = Logger()
 
-    algorithm.evaluate(10_000, callback=callback)
-    algorithm.warmup(10_000)
-    algorithm.train(500_000, callback=callback)
-    algorithm.evaluate(10_000, callback=callback)
+    algorithm.train(args.total_timesteps, callback=logger)
+    algorithm.evaluate(10_000, callback=logger)
 
-    envs.close()
     writer.close()

@@ -1,4 +1,3 @@
-from functools import partial
 import random
 import time
 from dataclasses import dataclass, field
@@ -11,52 +10,51 @@ import numpy as np
 import tyro
 from torch.utils.tensorboard import SummaryWriter
 
-from rlx.algorithms.dqn import DQNConfig, DQN
-from rlx.buffers.replay_buffer import ReplayBuffer
+from rlx.algorithms.ppo import PPOConfig, PPO
+from rlx.buffers.rollout_buffer import RolloutBuffer
 from rlx.environments import CartPole
 from rlx.utils.logger import Logger
+from rlx.utils.distributions import Categorical
 
 
 @dataclass
 class Args:
-    experiment_name: str = "dqn"
+    experiment_name: str = "ppo"
     seed: int = 1
-    total_timesteps: int = 500000
+    total_timesteps: int = 50_000_000
     learning_rate: float = 2.5e-4
-    buffer_size: int = 10000
-    learning_starts: int = 10000
-    start_e: float = 1.0
-    end_e: float = 0.05
-    exploration_fraction: float = 0.5
     track: bool = False
     wandb_project_name: str = "rlx"
     wandb_entity: str = ""
-    dqn: DQNConfig = field(default_factory=DQNConfig)
+    ppo: PPOConfig = field(default_factory=PPOConfig)
 
 
-def linear_schedule(start_e: float, end_e: float, duration: float, t: int):
-    slope = (end_e - start_e) / duration
-    return max(slope * t + start_e, end_e)
-
-
-class QNetwork(nn.Module):
+class ActorCritic(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.network = nn.Sequential(
-            nn.Linear(np.array(env.observation_space.shape).prod(), 120),
-            nn.ReLU(),
-            nn.Linear(120, 84),
-            nn.ReLU(),
-            nn.Linear(84, env.action_space.n),
+        observation_dim = np.array(env.observation_space.shape).prod()
+        self.actor = nn.Sequential(
+            nn.Linear(observation_dim, 64),
+            nn.Tanh(),
+            nn.Linear(64, 64),
+            nn.Tanh(),
+            nn.Linear(64, env.action_space.n),
+        )
+        self.critic = nn.Sequential(
+            nn.Linear(observation_dim, 64),
+            nn.Tanh(),
+            nn.Linear(64, 64),
+            nn.Tanh(),
+            nn.Linear(64, 1),
         )
 
     def __call__(self, x):
-        return self.network(x)
+        return Categorical(self.actor(x)), self.critic(x)
 
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
-    config = args.dqn
+    config = args.ppo
     run_name = f"{args.experiment_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
@@ -86,38 +84,28 @@ if __name__ == "__main__":
         env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
 
-    q_network = QNetwork(env)
-    mx.eval(q_network.parameters())
+    network = ActorCritic(env)
+    mx.eval(network.parameters())
     optimizer = optim.Adam(learning_rate=args.learning_rate)
-    target_network = QNetwork(env).update(q_network.parameters())
 
-    buffer = ReplayBuffer(
-        args.buffer_size,
+    buffer = RolloutBuffer(
+        config.num_steps,
         env.observation_space,
         env.action_space,
+        gamma=config.gamma,
         num_envs=config.num_envs,
     )
-
-    epsilon_schedule = partial(
-        linear_schedule,
-        start_e=args.start_e,
-        end_e=args.end_e,
-        duration=args.exploration_fraction * args.total_timesteps,
-    )
-    algorithm = DQN(
+    algorithm = PPO(
         config=config,
         env=env,
-        q_network=q_network,
-        target_network=target_network,
+        network=network,
         optimizer=optimizer,
         buffer=buffer,
-        epsilon_schedule=epsilon_schedule,
         key=mx.random.key(args.seed),
     )
 
     logger = Logger()
 
-    algorithm.warmup(args.learning_starts)
     algorithm.train(args.total_timesteps, callback=logger)
     algorithm.evaluate(10_000, callback=logger)
 
