@@ -13,6 +13,24 @@ RLX is a collection of Reinforcement Learning algorithms implemented in [MLX](ht
 | SAC | `rlx/algorithms/sac.py` | continuous |
 | TD3 | `rlx/algorithms/td3.py` | continuous |
 
+## Environments
+
+All environments are MLX-native and vectorized, so resets, steps, and the learner all run on device. Classic-control environments are importable from `rlx.environments`; the MinAtar suite lives under `rlx.environments.minatar`. The MinAtar ports are branchless and validated against the reference [`minatar`](https://github.com/kenjyoung/MinAtar) package.
+
+| Environment | Import | Action space |
+| --- | --- | --- |
+| CartPole | `rlx.environments.CartPole` | discrete |
+| MountainCar | `rlx.environments.MountainCar` | discrete |
+| Acrobot | `rlx.environments.Acrobot` | discrete |
+| Pendulum | `rlx.environments.Pendulum` | continuous |
+| MinAtar Breakout | `rlx.environments.minatar.Breakout` | discrete |
+| MinAtar Freeway | `rlx.environments.minatar.Freeway` | discrete |
+| MinAtar SpaceInvaders | `rlx.environments.minatar.SpaceInvaders` | discrete |
+| MinAtar Asterix | `rlx.environments.minatar.Asterix` | discrete |
+| MinAtar Seaquest | `rlx.environments.minatar.Seaquest` | discrete |
+
+Environments from other suites can be driven through the `EnvPool` adapter, which wraps a pre-vectorized [EnvPool](https://github.com/sail-sg/envpool) environment behind the same `Environment` interface.
+
 ## Prerequisites
 
 - Python 3.11 or later
@@ -30,7 +48,7 @@ uv sync
 ## Project structure
 
 - `rlx/algorithms/` holds the algorithm implementations (`DQN`, `REINFORCE`, `A2C`, `PPO`, `SAC`, `TD3`) and their configs
-- `rlx/environments/` holds the vectorized MLX-native `CartPole`, the `Environment` interface, and the `EnvPool` adapter
+- `rlx/environments/` holds the MLX-native environments: classic control (`CartPole`, `Pendulum`, `Acrobot`, `MountainCar`) in `classic_control/` and the MinAtar suite (`Breakout`, `Freeway`, `SpaceInvaders`, `Asterix`, `Seaquest`) in `minatar/`, alongside the `Environment` interface and the `EnvPool` adapter
 - `rlx/buffers/` holds `RolloutBuffer` for on-policy and `ReplayBuffer` for off-policy
 - `rlx/utils/` holds action distributions, the `Logger`, and shared helpers like GAE, returns, and `soft_update`
 - `examples/` holds a runnable training script per algorithm
@@ -52,6 +70,7 @@ Experiment level flags such as `--env-id`, `--seed`, `--total-timesteps`, and `-
 ```python
 from rlx import PPO, PPOConfig
 from rlx.environments import CartPole
+from rlx.environments.minatar import Breakout
 ```
 
 ## Contributing

@@ -9,7 +9,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Noah Farr", email = "login@noahfarr.com" }]
 keywords = ["reinforcement-learning", "mlx", "deep-learning", "gymnasium", "rl"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
