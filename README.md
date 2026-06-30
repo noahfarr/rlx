@@ -40,9 +40,9 @@ uv sync
 Each algorithm has a runnable example wired with a [tyro](https://github.com/brentyi/tyro) CLI.
 
 ```bash
-uv run examples/ppo.py
-uv run examples/sac.py --env-id Pendulum-v1
-uv run examples/ppo.py --ppo.num-envs 8192 --ppo.num-steps 16
+uv run examples/ppo_cartpole.py
+uv run examples/sac_pendulum.py
+uv run examples/ppo_cartpole.py --ppo.num-envs 8192 --ppo.num-steps 16
 ```
 
 Experiment level flags such as `--env-id`, `--seed`, `--total-timesteps`, and `--learning-rate` live on the example. Algorithm hyperparameters are nested under the algorithm name, for example `--ppo.gamma` or `--sac.tau`. Add `--help` to any example to see all options.
