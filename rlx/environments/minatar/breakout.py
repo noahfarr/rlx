@@ -29,7 +29,7 @@ class Breakout(Environment):
         brick = state["brick_map"] != 0
         return mx.stack([paddle, ball, trail, brick], axis=-1).astype(mx.float32)
 
-    def reset(self, key: mx.array) -> tuple[mx.array, EnvState]:
+    def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]:
         start = mx.random.randint(0, 2, key=key)
         ball_x = mx.where(start == 0, 0, 9)
         ball_dir = mx.where(start == 0, 2, 3)
@@ -45,7 +45,7 @@ class Breakout(Environment):
             "last_y": mx.array(3),
             "time": mx.array(0, dtype=mx.int32),
         }
-        return self._observation(state), state
+        return self._observation(state), state, {}
 
     def step_env(
         self, key: mx.array, state: EnvState, action: mx.array

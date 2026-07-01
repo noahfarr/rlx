@@ -124,12 +124,10 @@ if __name__ == "__main__":
         % ("\n".join([f"|{key}|{value}|" for key, value in vars(config).items()])),
     )
 
-    # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
     mx.random.seed(args.seed)
 
-    # env setup
     envs = gym.vector.SyncVectorEnv(
         [
             make_env(args.env_id, args.seed + i, i, False, run_name)

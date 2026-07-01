@@ -43,7 +43,7 @@ class Freeway(Environment):
             channels.append(mx.max(trail_oh & (speed_idx == k).reshape(8, 1, 1), axis=0))
         return mx.stack(channels, axis=-1).astype(mx.float32)
 
-    def reset(self, key: mx.array) -> tuple[mx.array, EnvState]:
+    def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]:
         car_speed, car_timer = self._random_cars(key)
         state: EnvState = {
             "car_x": mx.zeros((8,), dtype=mx.int32),
@@ -54,7 +54,7 @@ class Freeway(Environment):
             "terminate_timer": mx.array(TIME_LIMIT, dtype=mx.int32),
             "time": mx.array(0, dtype=mx.int32),
         }
-        return self._observation(state), state
+        return self._observation(state), state, {}
 
     def step_env(
         self, key: mx.array, state: EnvState, action: mx.array

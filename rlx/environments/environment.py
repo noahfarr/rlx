@@ -9,7 +9,7 @@ EnvState = dict[str, mx.array]
 
 class Environment(ABC):
     @abstractmethod
-    def reset(self, key: mx.array) -> tuple[mx.array, EnvState]: ...
+    def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]: ...
 
     @abstractmethod
     def step_env(
@@ -26,7 +26,7 @@ class Environment(ABC):
         )
         done = mx.logical_or(terminated, truncated)
 
-        reset_observation, reset_state = self.reset(reset_key)
+        reset_observation, reset_state, _ = self.reset(reset_key)
         state = tree_map(lambda r, s: mx.where(done, r, s), reset_state, state)
         observation = mx.where(done, reset_observation, observation)
 

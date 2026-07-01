@@ -1,13 +1,11 @@
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-import numpy as np
-
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
 
-from rlx.environments.environment import Environment, EnvState
+from rlx.environments.environment import Environment
 from rlx.buffers.rollout_buffer import RolloutBuffer
 from rlx.utils import compute_generalized_advantage_estimate, flatten
 
@@ -35,56 +33,18 @@ class A2C:
     step: int = 0
 
     def __post_init__(self):
-        if getattr(self.env, "vectorized", False):
-            self._reset = self.env.reset
-            self._step = self.env.step
-        else:
-            self._reset = mx.vmap(self.env.reset)
-            self._step = mx.vmap(self.env.step)
         state = [self.network.state, self.optimizer.state]
         self.update_step = mx.compile(self.update_step, inputs=state, outputs=state)
-
-    def reset(self) -> tuple[mx.array, EnvState]:
-        self.key, reset_key = mx.random.split(self.key)
-        keys = mx.random.split(reset_key, self.config.num_envs)
-        observation, state = self._reset(keys)
-        mx.eval(observation, *state.values())
-        return observation, state
-
-    def environment_step(self, state: EnvState, action: mx.array):
-        self.key, step_key = mx.random.split(self.key)
-        keys = mx.random.split(step_key, self.config.num_envs)
-        observation, state, reward, terminated, truncated, info = self._step(
-            keys, state, action
-        )
-        mx.eval(observation, reward, terminated, truncated, *state.values())
-        return observation, state, reward, terminated, truncated, info
-
-    def report(self, callback, episode_returns, episode_lengths, terminated, truncated):
-        done = mx.logical_or(terminated, truncated)
-        done_np = np.asarray(done)
-        if callback is not None and done_np.any():
-            callback(
-                {
-                    "episode": {
-                        "r": np.asarray(episode_returns),
-                        "l": np.asarray(episode_lengths),
-                    },
-                    "_episode": done_np,
-                },
-                self.step,
-            )
-        episode_returns = mx.where(done, 0.0, episode_returns)
-        episode_lengths = mx.where(done, 0.0, episode_lengths)
-        return episode_returns, episode_lengths
 
     def warmup(self, num_steps: int):
         pass
 
     def train(self, num_steps: int, callback: Optional[Callable] = None):
-        observation, state = self.reset()
-        episode_returns = mx.zeros((self.config.num_envs,))
-        episode_lengths = mx.zeros((self.config.num_envs,))
+        self.key, reset_key = mx.random.split(self.key)
+        keys = mx.random.split(reset_key, self.config.num_envs)
+        observation, state, _ = self.env.reset(keys)
+        mx.eval(observation, *state.values())
+
         next_termination = mx.zeros(self.config.num_envs)
         while self.step < num_steps:
             self.buffer.reset()
@@ -92,15 +52,17 @@ class A2C:
                 distribution, value = self.network(observation)
                 action = distribution.sample()
 
+                self.key, step_key = mx.random.split(self.key)
+                keys = mx.random.split(step_key, self.config.num_envs)
                 next_observation, state, reward, terminated, truncated, info = (
-                    self.environment_step(state, action)
+                    self.env.step(keys, state, action)
+                )
+                mx.eval(
+                    next_observation, reward, terminated, truncated, *state.values()
                 )
 
-                episode_returns = episode_returns + reward
-                episode_lengths = episode_lengths + 1
-                episode_returns, episode_lengths = self.report(
-                    callback, episode_returns, episode_lengths, terminated, truncated
-                )
+                if callback is not None and "episode" in info:
+                    callback(info, self.step)
 
                 self.buffer.add(
                     observation,
@@ -168,19 +130,21 @@ class A2C:
         mx.eval(self.network.state, self.optimizer.state)
 
     def evaluate(self, num_steps: int, callback: Optional[Callable] = None):
-        observation, state = self.reset()
-        episode_returns = mx.zeros((self.config.num_envs,))
-        episode_lengths = mx.zeros((self.config.num_envs,))
+        self.key, reset_key = mx.random.split(self.key)
+        keys = mx.random.split(reset_key, self.config.num_envs)
+        observation, state, _ = self.env.reset(keys)
+        mx.eval(observation, *state.values())
+
         for _ in range(0, num_steps, self.config.num_envs):
             distribution, _ = self.network(observation)
             action = distribution.sample()
 
+            self.key, step_key = mx.random.split(self.key)
+            keys = mx.random.split(step_key, self.config.num_envs)
             observation, state, reward, terminated, truncated, info = (
-                self.environment_step(state, action)
+                self.env.step(keys, state, action)
             )
+            mx.eval(observation, reward, terminated, truncated, *state.values())
 
-            episode_returns = episode_returns + reward
-            episode_lengths = episode_lengths + 1
-            episode_returns, episode_lengths = self.report(
-                callback, episode_returns, episode_lengths, terminated, truncated
-            )
+            if callback is not None and "episode" in info:
+                callback(info, self.step)

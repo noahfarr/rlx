@@ -29,8 +29,6 @@ class RunningMeanStd:
 
 
 class EnvPool:
-    vectorized = True
-
     def __init__(
         self,
         env_id,
@@ -63,6 +61,8 @@ class EnvPool:
         self.clip = clip
 
         self.discounted_returns = np.zeros(num_envs, dtype=np.float64)
+        self.episode_returns = np.zeros(num_envs, dtype=np.float64)
+        self.episode_lengths = np.zeros(num_envs, dtype=np.int64)
         self.observation_rms = RunningMeanStd(self._observation_space.shape)
         self.return_rms = RunningMeanStd(())
 
@@ -86,7 +86,9 @@ class EnvPool:
     def reset(self, key=None):
         observation, info = self.envs.reset()
         self.discounted_returns[:] = 0
-        return mx.array(self.normalize_observation(observation)), {}
+        self.episode_returns[:] = 0
+        self.episode_lengths[:] = 0
+        return mx.array(self.normalize_observation(observation)), {}, {}
 
     def step(self, key, state, action):
         observation, reward, terminated, truncated, info = self.envs.step(
@@ -95,8 +97,21 @@ class EnvPool:
         observation = self.normalize_observation(observation)
         reward = reward.astype(np.float64)
 
+        done = np.logical_or(terminated, truncated)
+
+        self.episode_returns += reward
+        self.episode_lengths += 1
+        info = {
+            "episode": {
+                "r": self.episode_returns.copy(),
+                "l": self.episode_lengths.copy(),
+            },
+            "_episode": done,
+        }
+        self.episode_returns[done] = 0.0
+        self.episode_lengths[done] = 0
+
         if self.normalize_rewards:
-            done = np.logical_or(terminated, truncated)
             self.discounted_returns = self.discounted_returns * self.gamma + reward
             self.return_rms.update(self.discounted_returns)
             reward = reward / np.sqrt(self.return_rms.var + self.epsilon)
@@ -109,7 +124,7 @@ class EnvPool:
             mx.array(reward.astype(np.float32)),
             mx.array(terminated),
             mx.array(truncated),
-            {},
+            info,
         )
 
     def close(self):

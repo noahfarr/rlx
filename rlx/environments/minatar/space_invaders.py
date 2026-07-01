@@ -39,7 +39,7 @@ class SpaceInvaders(Environment):
             axis=-1,
         ).astype(mx.float32)
 
-    def reset(self, key: mx.array) -> tuple[mx.array, EnvState]:
+    def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]:
         state: EnvState = {
             "pos": mx.array(5),
             "f_bullet_map": mx.zeros((10, 10)),
@@ -53,7 +53,7 @@ class SpaceInvaders(Environment):
             "shot_timer": mx.array(0),
             "time": mx.array(0, dtype=mx.int32),
         }
-        return self._observation(state), state
+        return self._observation(state), state, {}
 
     def step_env(
         self, key: mx.array, state: EnvState, action: mx.array

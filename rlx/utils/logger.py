@@ -11,7 +11,9 @@ class Logger:
         self.returns = []
 
     def __call__(self, info, step):
-        self.returns.extend(info["episode"]["r"][info["_episode"]].tolist())
+        returns = np.asarray(info["episode"]["r"])
+        mask = np.asarray(info["_episode"])
+        self.returns.extend(returns[mask].tolist())
         if step >= self.next_log:
             self.next_log += self.log_interval
             elapsed = time.time() - self.start_time

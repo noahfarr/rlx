@@ -28,14 +28,14 @@ class Pendulum(Environment):
         theta = state["theta"]
         return mx.stack([mx.cos(theta), mx.sin(theta), state["theta_dot"]])
 
-    def reset(self, key: mx.array) -> tuple[mx.array, EnvState]:
+    def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]:
         sample = mx.random.uniform(shape=(2,), key=key)
         state: EnvState = {
             "theta": sample[0] * (2.0 * math.pi) - math.pi,
             "theta_dot": sample[1] * 2.0 - 1.0,
             "time": mx.array(0, dtype=mx.int32),
         }
-        return self._observation(state), state
+        return self._observation(state), state, {}
 
     def step_env(
         self, key: mx.array, state: EnvState, action: mx.array

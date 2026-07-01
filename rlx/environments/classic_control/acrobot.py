@@ -41,7 +41,7 @@ class Acrobot(Environment):
             ]
         )
 
-    def reset(self, key: mx.array) -> tuple[mx.array, EnvState]:
+    def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]:
         init = mx.random.uniform(low=-0.1, high=0.1, shape=(4,), key=key)
         state: EnvState = {
             "theta1": init[0],
@@ -50,7 +50,7 @@ class Acrobot(Environment):
             "dtheta2": init[3],
             "time": mx.array(0, dtype=mx.int32),
         }
-        return self._observation(state), state
+        return self._observation(state), state, {}
 
     def _dsdt(self, s: mx.array, torque: mx.array) -> mx.array:
         theta1, theta2, dtheta1, dtheta2 = s[0], s[1], s[2], s[3]

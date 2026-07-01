@@ -25,14 +25,14 @@ class MountainCar(Environment):
     def _observation(self, state: EnvState) -> mx.array:
         return mx.stack([state["position"], state["velocity"]])
 
-    def reset(self, key: mx.array) -> tuple[mx.array, EnvState]:
+    def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]:
         position = mx.random.uniform(low=-0.6, high=-0.4, key=key)
         state: EnvState = {
             "position": position,
             "velocity": mx.zeros_like(position),
             "time": mx.array(0, dtype=mx.int32),
         }
-        return self._observation(state), state
+        return self._observation(state), state, {}
 
     def step_env(
         self, key: mx.array, state: EnvState, action: mx.array

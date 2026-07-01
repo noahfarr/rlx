@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from rlx.algorithms.dqn import DQNConfig, DQN
 from rlx.buffers.replay_buffer import ReplayBuffer
-from rlx.environments import CartPole
+from rlx.environments import CartPole, RecordEpisodeStatistics, Vectorize
 from rlx.utils.logger import Logger
 
 
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
     mx.random.seed(args.seed)
 
-    env = CartPole()
+    env = Vectorize(RecordEpisodeStatistics(CartPole()))
     assert isinstance(
         env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"

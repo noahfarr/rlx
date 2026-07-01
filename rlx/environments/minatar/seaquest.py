@@ -92,7 +92,7 @@ class Seaquest(Environment):
             axis=-1,
         ).astype(mx.float32)
 
-    def reset(self, key: mx.array) -> tuple[mx.array, EnvState]:
+    def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]:
         zeros = mx.zeros((CAP,), dtype=mx.int32)
         falses = mx.zeros((CAP,), dtype=mx.bool_)
         s: EnvState = {
@@ -115,7 +115,7 @@ class Seaquest(Environment):
             "surface": mx.array(True),
             "time": mx.array(0, dtype=mx.int32),
         }
-        return self._observation(s), s
+        return self._observation(s), s, {}
 
     def step_env(self, key, state, action):
         s = dict(state)

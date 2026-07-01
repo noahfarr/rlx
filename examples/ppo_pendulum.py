@@ -90,12 +90,10 @@ if __name__ == "__main__":
         % ("\n".join([f"|{key}|{value}|" for key, value in vars(config).items()])),
     )
 
-    # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
     mx.random.seed(args.seed)
 
-    # env setup
     env = EnvPool(
         args.env_id,
         config.num_envs,

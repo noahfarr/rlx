@@ -47,7 +47,7 @@ class Asterix(Environment):
         trail = mx.max(trail_oh, axis=0)
         return mx.stack([player, enemy, trail, gold_channel], axis=-1).astype(mx.float32)
 
-    def reset(self, key: mx.array) -> tuple[mx.array, EnvState]:
+    def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]:
         state: EnvState = {
             "player_x": mx.array(5),
             "player_y": mx.array(5),
@@ -63,7 +63,7 @@ class Asterix(Environment):
             "ramp_index": mx.array(0),
             "time": mx.array(0, dtype=mx.int32),
         }
-        return self._observation(state), state
+        return self._observation(state), state, {}
 
     def step_env(
         self, key: mx.array, state: EnvState, action: mx.array

@@ -40,7 +40,7 @@ class CartPole(Environment):
             [state["x"], state["x_dot"], state["theta"], state["theta_dot"]]
         )
 
-    def reset(self, key: mx.array) -> tuple[mx.array, EnvState]:
+    def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]:
         init = mx.random.uniform(low=-0.05, high=0.05, shape=(4,), key=key)
         state: EnvState = {
             "x": init[0],
@@ -49,7 +49,7 @@ class CartPole(Environment):
             "theta_dot": init[3],
             "time": mx.array(0, dtype=mx.int32),
         }
-        return self._observation(state), state
+        return self._observation(state), state, {}
 
     def step_env(
         self, key: mx.array, state: EnvState, action: mx.array

@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from rlx.algorithms.a2c import A2CConfig, A2C
 from rlx.buffers.rollout_buffer import RolloutBuffer
-from rlx.environments import CartPole
+from rlx.environments import CartPole, RecordEpisodeStatistics, Vectorize
 from rlx.utils.logger import Logger
 from rlx.utils.distributions import Categorical
 
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
     mx.random.seed(args.seed)
 
-    env = CartPole()
+    env = Vectorize(RecordEpisodeStatistics(CartPole()))
     assert isinstance(
         env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"

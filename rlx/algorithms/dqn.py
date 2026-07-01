@@ -2,14 +2,12 @@ import random
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-import numpy as np
-
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
 from mlx.utils import tree_map
 
-from rlx.environments.environment import Environment, EnvState
+from rlx.environments.environment import Environment
 
 
 @dataclass
@@ -35,12 +33,6 @@ class DQN:
     step: int = 0
 
     def __post_init__(self):
-        if getattr(self.env, "vectorized", False):
-            self._reset = self.env.reset
-            self._step = self.env.step
-        else:
-            self._reset = mx.vmap(self.env.reset)
-            self._step = mx.vmap(self.env.step)
         state = [self.q_network.state, self.optimizer.state]
         self.update_step = mx.compile(self.update_step, inputs=state, outputs=state)
 
@@ -56,53 +48,27 @@ class DQN:
         self.optimizer.update(self.q_network, grads)
         return loss
 
-    def reset(self) -> tuple[mx.array, EnvState]:
-        self.key, reset_key = mx.random.split(self.key)
-        keys = mx.random.split(reset_key, self.config.num_envs)
-        observation, state = self._reset(keys)
-        mx.eval(observation, *state.values())
-        return observation, state
-
-    def environment_step(self, state: EnvState, action: mx.array):
-        self.key, step_key = mx.random.split(self.key)
-        keys = mx.random.split(step_key, self.config.num_envs)
-        observation, state, reward, terminated, truncated, info = self._step(
-            keys, state, action
-        )
-        mx.eval(observation, reward, terminated, truncated, *state.values())
-        return observation, state, reward, terminated, truncated, info
-
     def random_action(self) -> mx.array:
         self.key, action_key = mx.random.split(self.key)
         return mx.random.randint(
             0, self.env.action_space.n, shape=(self.config.num_envs,), key=action_key
         )
 
-    def report(self, callback, episode_returns, episode_lengths, terminated, truncated):
-        done = mx.logical_or(terminated, truncated)
-        done_np = np.asarray(done)
-        if callback is not None and done_np.any():
-            callback(
-                {
-                    "episode": {
-                        "r": np.asarray(episode_returns),
-                        "l": np.asarray(episode_lengths),
-                    },
-                    "_episode": done_np,
-                },
-                self.step,
-            )
-        episode_returns = mx.where(done, 0.0, episode_returns)
-        episode_lengths = mx.where(done, 0.0, episode_lengths)
-        return episode_returns, episode_lengths
-
     def warmup(self, num_steps: int):
-        observation, state = self.reset()
+        self.key, reset_key = mx.random.split(self.key)
+        keys = mx.random.split(reset_key, self.config.num_envs)
+        observation, state, _ = self.env.reset(keys)
+        mx.eval(observation, *state.values())
+
         for _ in range(0, num_steps, self.config.num_envs):
             action = self.random_action()
+
+            self.key, step_key = mx.random.split(self.key)
+            keys = mx.random.split(step_key, self.config.num_envs)
             next_observation, state, reward, terminated, truncated, info = (
-                self.environment_step(state, action)
+                self.env.step(keys, state, action)
             )
+            mx.eval(next_observation, reward, terminated, truncated, *state.values())
 
             self.buffer.add(
                 observation, next_observation, action, reward, terminated, truncated
@@ -111,9 +77,11 @@ class DQN:
             observation = next_observation
 
     def train(self, num_steps: int, callback: Optional[Callable] = None):
-        observation, state = self.reset()
-        episode_returns = mx.zeros((self.config.num_envs,))
-        episode_lengths = mx.zeros((self.config.num_envs,))
+        self.key, reset_key = mx.random.split(self.key)
+        keys = mx.random.split(reset_key, self.config.num_envs)
+        observation, state, _ = self.env.reset(keys)
+        mx.eval(observation, *state.values())
+
         for _ in range(0, num_steps, self.config.num_envs):
             if random.random() < self.epsilon_schedule(t=self.step):
                 action = self.random_action()
@@ -121,15 +89,15 @@ class DQN:
                 q_values = self.q_network(observation)
                 action = mx.argmax(q_values, axis=-1)
 
+            self.key, step_key = mx.random.split(self.key)
+            keys = mx.random.split(step_key, self.config.num_envs)
             next_observation, state, reward, terminated, truncated, info = (
-                self.environment_step(state, action)
+                self.env.step(keys, state, action)
             )
+            mx.eval(next_observation, reward, terminated, truncated, *state.values())
 
-            episode_returns = episode_returns + reward
-            episode_lengths = episode_lengths + 1
-            episode_returns, episode_lengths = self.report(
-                callback, episode_returns, episode_lengths, terminated, truncated
-            )
+            if callback is not None and "episode" in info:
+                callback(info, self.step)
 
             self.buffer.add(
                 observation, next_observation, action, reward, terminated, truncated
@@ -165,19 +133,21 @@ class DQN:
                     self.target_network.update(target_params)
 
     def evaluate(self, num_steps: int, callback: Optional[Callable] = None):
-        observation, state = self.reset()
-        episode_returns = mx.zeros((self.config.num_envs,))
-        episode_lengths = mx.zeros((self.config.num_envs,))
+        self.key, reset_key = mx.random.split(self.key)
+        keys = mx.random.split(reset_key, self.config.num_envs)
+        observation, state, _ = self.env.reset(keys)
+        mx.eval(observation, *state.values())
+
         for _ in range(0, num_steps, self.config.num_envs):
             q_values = self.q_network(observation)
             action = mx.argmax(q_values, axis=-1)
 
+            self.key, step_key = mx.random.split(self.key)
+            keys = mx.random.split(step_key, self.config.num_envs)
             observation, state, reward, terminated, truncated, info = (
-                self.environment_step(state, action)
+                self.env.step(keys, state, action)
             )
+            mx.eval(observation, reward, terminated, truncated, *state.values())
 
-            episode_returns = episode_returns + reward
-            episode_lengths = episode_lengths + 1
-            episode_returns, episode_lengths = self.report(
-                callback, episode_returns, episode_lengths, terminated, truncated
-            )
+            if callback is not None and "episode" in info:
+                callback(info, self.step)
