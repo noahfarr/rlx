@@ -4,7 +4,7 @@
 
 **Reinforcement learning that runs end-to-end on [MLX](https://github.com/ml-explore/mlx), Apple's array framework.**
 
-Single-file, CleanRL-style algorithms and vectorized environments that live entirely on device with over a million environment steps per second on Apple silicon.
+Single-file, CleanRL-style algorithms and vectorized environments that live entirely on device: over a million environment steps per second on Apple silicon.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
@@ -17,11 +17,11 @@ Single-file, CleanRL-style algorithms and vectorized environments that live enti
 
 ## Why RLX
 
-- **On-device, end-to-end.** Environments, buffers, and the learner all run on the GPU — no host round-trips between steps.
+- **On-device, end-to-end.** Environments, buffers, and the learner all run on the GPU, with no host round-trips between steps.
 - **Fused updates.** Every update step is wrapped in `mx.compile`, fusing the training graph for maximum throughput.
 - **Fast.** The bundled MLX-native environments reach well over a million environment steps per second on Apple silicon.
 - **Readable.** Each algorithm is a single, self-contained, CleanRL-style file you can read top to bottom.
-- **Portable.** The correct MLX backend — Metal on Apple silicon, CUDA on Linux — is selected automatically.
+- **Portable.** The correct MLX backend (Metal on Apple silicon, CUDA on Linux) is selected automatically.
 
 ## Algorithms
 
@@ -75,7 +75,7 @@ uv run examples/sac_pendulum.py
 uv run examples/ppo_cartpole.py --ppo.num-envs 8192 --ppo.num-steps 16
 ```
 
-Experiment-level flags — `--seed`, `--total-timesteps`, `--learning-rate`, `--track` — live on the example.
+Experiment-level flags (`--seed`, `--total-timesteps`, `--learning-rate`, `--track`) live on the example.
 Algorithm hyperparameters are nested under the algorithm name, e.g. `--ppo.gamma` or `--sac.tau`. Append `--help` to
 any example to see every option.
 
@@ -94,7 +94,7 @@ The top-level `rlx` package also re-exports the core algorithms and their config
 | Path | What's inside |
 | --- | --- |
 | `rlx/algorithms/` | Algorithm implementations (DQN, REINFORCE, A2C, PPO, SAC, TD3) and their configs |
-| `rlx/environments/` | MLX-native environments — `classic_control/` and `minatar/` — plus the `Environment` interface and `EnvPool` adapter |
+| `rlx/environments/` | MLX-native environments (`classic_control/` and `minatar/`) plus the `Environment` interface and `EnvPool` adapter |
 | `rlx/buffers/` | `RolloutBuffer` (on-policy) and `ReplayBuffer` (off-policy) |
 | `rlx/utils/` | Action distributions, the `Logger`, and shared helpers (GAE, returns, `soft_update`) |
 | `examples/` | One runnable training script per algorithm |
@@ -105,7 +105,7 @@ Contributions are welcome! Fork the repo, create a branch, commit your changes, 
 
 ## License
 
-Released under the MIT License — see [LICENSE](LICENSE) for the full text.
+Released under the MIT License. See [LICENSE](LICENSE) for the full text.
 
 ## Acknowledgments
 
