@@ -4,7 +4,7 @@
 
 **Reinforcement learning that runs end-to-end on [MLX](https://github.com/ml-explore/mlx), Apple's array framework.**
 
-Single-file, CleanRL-style algorithms and vectorized environments that live entirely on device — over a million environment steps per second on Apple silicon.
+Single-file, CleanRL-style algorithms and vectorized environments that live entirely on device with over a million environment steps per second on Apple silicon.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
