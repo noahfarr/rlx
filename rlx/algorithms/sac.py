@@ -1,14 +1,13 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-import gymnasium as gym
-from gymnasium.vector import AutoresetMode
 import numpy as np
 
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
 
+from rlx.environments.environment import Environment
 from rlx.utils import soft_update
 
 
@@ -27,22 +26,19 @@ class SACConfig:
 @dataclass
 class SAC:
     config: SACConfig
-    envs: gym.vector.VectorEnv
+    env: Environment
     actor_network: nn.Module
     critic_network: nn.Module
     target_critic_network: nn.Module
     actor_optimizer: optim.Optimizer
     critic_optimizer: optim.Optimizer
+    key: mx.array
     alpha_optimizer: Optional[optim.Optimizer] = None
     buffer: Any = None
     step: int = 0
 
     def __post_init__(self):
-        assert (
-            self.envs.metadata.get("autoreset_mode") == AutoresetMode.NEXT_STEP
-        ), "SAC assumes NEXT_STEP autoreset so the stored next_observation is the true final observation"
-
-        action_dim = int(np.prod(self.envs.single_action_space.shape))
+        action_dim = int(np.prod(self.env.action_space.shape))
         self.target_entropy = -float(action_dim)
         self.log_alpha = mx.array(float(np.log(self.config.alpha)))
 
@@ -115,32 +111,58 @@ class SAC:
             return mx.exp(self.log_alpha)
         return mx.array(self.config.alpha)
 
-    def warmup(self, num_steps: int):
-        observation, info = self.envs.reset()
-        for _ in range(0, num_steps, self.config.num_envs):
-            action = self.envs.action_space.sample()
-            next_observation, reward, terminated, truncated, info = self.envs.step(
-                np.array(action)
-            )
+    def random_action(self) -> mx.array:
+        self.key, action_key = mx.random.split(self.key)
+        low = mx.array(self.env.action_space.low)
+        high = mx.array(self.env.action_space.high)
+        shape = (self.config.num_envs, *self.env.action_space.shape)
+        return mx.random.uniform(shape=shape, key=action_key) * (high - low) + low
 
-            self.buffer.add(observation, next_observation, action, reward, terminated, truncated)
+    def warmup(self, num_steps: int):
+        self.key, reset_key = mx.random.split(self.key)
+        keys = mx.random.split(reset_key, self.config.num_envs)
+        observation, state, _ = self.env.reset(keys)
+        mx.eval(observation, *state.values())
+
+        for _ in range(0, num_steps, self.config.num_envs):
+            action = self.random_action()
+
+            self.key, step_key = mx.random.split(self.key)
+            keys = mx.random.split(step_key, self.config.num_envs)
+            next_observation, state, reward, terminated, truncated, info = (
+                self.env.step(keys, state, action)
+            )
+            mx.eval(next_observation, reward, terminated, truncated, *state.values())
+
+            self.buffer.add(
+                observation, next_observation, action, reward, terminated, truncated
+            )
 
             observation = next_observation
 
     def train(self, num_steps: int, callback: Optional[Callable] = None):
-        observation, info = self.envs.reset()
+        self.key, reset_key = mx.random.split(self.key)
+        keys = mx.random.split(reset_key, self.config.num_envs)
+        observation, state, _ = self.env.reset(keys)
+        mx.eval(observation, *state.values())
+
         for _ in range(0, num_steps, self.config.num_envs):
-            distribution = self.actor_network(mx.array(observation))
+            distribution = self.actor_network(observation)
             action, _ = distribution.sample()
 
-            next_observation, reward, terminated, truncated, info = self.envs.step(
-                np.array(action)
+            self.key, step_key = mx.random.split(self.key)
+            keys = mx.random.split(step_key, self.config.num_envs)
+            next_observation, state, reward, terminated, truncated, info = (
+                self.env.step(keys, state, action)
             )
+            mx.eval(next_observation, reward, terminated, truncated, *state.values())
 
-            if "episode" in info and callback:
+            if callback is not None and "episode" in info:
                 callback(info, self.step)
 
-            self.buffer.add(observation, next_observation, action, reward, terminated, truncated)
+            self.buffer.add(
+                observation, next_observation, action, reward, terminated, truncated
+            )
 
             observation = next_observation
 
@@ -188,12 +210,21 @@ class SAC:
             )
 
     def evaluate(self, num_steps: int, callback: Optional[Callable] = None):
-        observation, info = self.envs.reset()
+        self.key, reset_key = mx.random.split(self.key)
+        keys = mx.random.split(reset_key, self.config.num_envs)
+        observation, state, _ = self.env.reset(keys)
+        mx.eval(observation, *state.values())
+
         for _ in range(0, num_steps, self.config.num_envs):
-            distribution = self.actor_network(mx.array(observation))
+            distribution = self.actor_network(observation)
             action = distribution.mode()
 
-            observation, *_, info = self.envs.step(np.array(action))
+            self.key, step_key = mx.random.split(self.key)
+            keys = mx.random.split(step_key, self.config.num_envs)
+            observation, state, reward, terminated, truncated, info = (
+                self.env.step(keys, state, action)
+            )
+            mx.eval(observation, reward, terminated, truncated, *state.values())
 
-            if "episode" in info and callback:
+            if callback is not None and "episode" in info:
                 callback(info, self.step)

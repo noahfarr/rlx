@@ -12,13 +12,13 @@ from torch.utils.tensorboard import SummaryWriter
 
 from rlx.algorithms.sac import SACConfig, SAC
 from rlx.buffers.replay_buffer import ReplayBuffer
+from rlx.environments import Pendulum, RecordEpisodeStatistics, Vectorize
 from rlx.utils.logger import Logger
 from rlx.utils.distributions import SquashedNormal
 
 
 @dataclass
 class Args:
-    env_id: str = "Pendulum-v1"
     experiment_name: str = "sac"
     seed: int = 1
     total_timesteps: int = 1000000
@@ -32,26 +32,11 @@ class Args:
     sac: SACConfig = field(default_factory=SACConfig)
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
-    def thunk():
-        if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        else:
-            env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env.action_space.seed(seed)
-
-        return env
-
-    return thunk
-
-
 class Actor(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, env):
         super().__init__()
-        observation_dim = np.array(envs.single_observation_space.shape).prod()
-        action_dim = np.array(envs.single_action_space.shape).prod()
+        observation_dim = np.array(env.observation_space.shape).prod()
+        action_dim = np.array(env.action_space.shape).prod()
         self.trunk = nn.Sequential(
             nn.Linear(observation_dim, 256),
             nn.ReLU(),
@@ -61,8 +46,8 @@ class Actor(nn.Module):
         self.mean = nn.Linear(256, action_dim)
         self.log_std = nn.Linear(256, action_dim)
 
-        high = mx.array(envs.single_action_space.high)
-        low = mx.array(envs.single_action_space.low)
+        high = mx.array(env.action_space.high)
+        low = mx.array(env.action_space.low)
         self.action_scale = (high - low) / 2.0
         self.action_bias = (high + low) / 2.0
 
@@ -77,10 +62,10 @@ class Actor(nn.Module):
 
 
 class TwinCritic(nn.Module):
-    def __init__(self, envs, num_critics=2):
+    def __init__(self, env, num_critics=2):
         super().__init__()
-        observation_dim = np.array(envs.single_observation_space.shape).prod()
-        action_dim = np.array(envs.single_action_space.shape).prod()
+        observation_dim = np.array(env.observation_space.shape).prod()
+        action_dim = np.array(env.action_space.shape).prod()
         input_dim = int(observation_dim + action_dim)
         self.num_critics = num_critics
 
@@ -111,7 +96,7 @@ class TwinCritic(nn.Module):
 if __name__ == "__main__":
     args = tyro.cli(Args)
     config = args.sac
-    run_name = f"{args.env_id}__{args.experiment_name}__{args.seed}__{int(time.time())}"
+    run_name = f"{args.experiment_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
 
@@ -135,20 +120,15 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
     mx.random.seed(args.seed)
 
-    envs = gym.vector.SyncVectorEnv(
-        [
-            make_env(args.env_id, args.seed + i, i, False, run_name)
-            for i in range(config.num_envs)
-        ]
-    )
+    env = Vectorize(RecordEpisodeStatistics(Pendulum()))
     assert isinstance(
-        envs.single_action_space, gym.spaces.Box
+        env.action_space, gym.spaces.Box
     ), "only continuous action space is supported"
 
-    actor_network = Actor(envs)
-    critic_network = TwinCritic(envs)
+    actor_network = Actor(env)
+    critic_network = TwinCritic(env)
     mx.eval(actor_network.parameters(), critic_network.parameters())
-    target_critic_network = TwinCritic(envs)
+    target_critic_network = TwinCritic(env)
     target_critic_network.update(critic_network.parameters())
 
     actor_optimizer = optim.Adam(learning_rate=args.policy_learning_rate)
@@ -159,18 +139,19 @@ if __name__ == "__main__":
 
     buffer = ReplayBuffer(
         args.buffer_size,
-        envs.single_observation_space,
-        envs.single_action_space,
+        env.observation_space,
+        env.action_space,
         num_envs=config.num_envs,
     )
     algorithm = SAC(
         config=config,
-        envs=envs,
+        env=env,
         actor_network=actor_network,
         critic_network=critic_network,
         target_critic_network=target_critic_network,
         actor_optimizer=actor_optimizer,
         critic_optimizer=critic_optimizer,
+        key=mx.random.key(args.seed),
         alpha_optimizer=alpha_optimizer,
         buffer=buffer,
     )
@@ -181,5 +162,4 @@ if __name__ == "__main__":
     algorithm.train(args.total_timesteps, callback=logger)
     algorithm.evaluate(10_000, callback=logger)
 
-    envs.close()
     writer.close()
