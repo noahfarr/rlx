@@ -67,9 +67,11 @@ class Seaquest(Environment):
         sub_front = (ROW == s["sub_y"]) & (COL == s["sub_x"])
         back_x = mx.where(s["sub_or"], s["sub_x"] - 1, s["sub_x"] + 1)
         sub_back = (ROW == s["sub_y"]) & (COL == back_x)
-        oxygen_lit = mx.maximum(0, s["oxygen"]) * 10 // MAX_OXYGEN
-        oxygen_gauge = (ROW == 9) & (COL < oxygen_lit)
-        diver_gauge = (ROW == 9) & (COL >= 9 - s["diver_count"]) & (COL < 9)
+        oxygen_lit = mx.floor(mx.maximum(0, s["oxygen"]) * 10 / MAX_OXYGEN).astype(
+            mx.int32
+        )
+        oxygen_gauge = (ROW == 9) * (COL < oxygen_lit)
+        diver_gauge = (ROW == 9) * (COL >= 9 - s["diver_count"]) * (COL < 9)
 
         trail = (
             _trail(s["ef_active"], s["ef_x"], s["ef_y"], s["ef_or"])

@@ -23,9 +23,9 @@ class Breakout(Environment):
         self._action_space = gym.spaces.Discrete(6)
 
     def _observation(self, state: EnvState) -> mx.array:
-        ball = (ROW == state["ball_y"]) & (COL == state["ball_x"])
-        paddle = (ROW == 9) & (COL == state["pos"])
-        trail = (ROW == state["last_y"]) & (COL == state["last_x"])
+        ball = (ROW == state["ball_y"]) * (COL == state["ball_x"])
+        paddle = (ROW == 9) * (COL == state["pos"])
+        trail = (ROW == state["last_y"]) * (COL == state["last_x"])
         brick = state["brick_map"] != 0
         return mx.stack([paddle, ball, trail, brick], axis=-1).astype(mx.float32)
 

@@ -29,10 +29,10 @@ class SpaceInvaders(Environment):
         alien_dir = state["alien_dir"]
         return mx.stack(
             [
-                (ROW == 9) & (COL == state["pos"]),
+                (ROW == 9) * (COL == state["pos"]),
                 alien,
-                alien & (alien_dir < 0),
-                alien & (alien_dir > 0),
+                alien * (alien_dir < 0),
+                alien * (alien_dir > 0),
                 state["f_bullet_map"] != 0,
                 state["e_bullet_map"] != 0,
             ],
@@ -70,7 +70,7 @@ class SpaceInvaders(Environment):
         ramp_index = state["ramp_index"]
 
         fire = (action == 5) & (shot_timer == 0)
-        f_bullet_map = mx.where(fire & (ROW == 9) & (COL == pos), 1.0, f_bullet_map)
+        f_bullet_map = mx.where(fire * (ROW == 9) * (COL == pos), 1.0, f_bullet_map)
         shot_timer = mx.where(fire, SHOT_COOL_DOWN, shot_timer)
         pos = mx.where(action == 1, mx.maximum(0, pos - 1), pos)
         pos = mx.where(action == 3, mx.minimum(9, pos + 1), pos)
@@ -80,8 +80,8 @@ class SpaceInvaders(Environment):
 
         e_bullet_map = mx.roll(e_bullet_map, 1, axis=0)
         e_bullet_map = mx.where(ROW == 0, 0.0, e_bullet_map)
-        terminated = e_bullet_map[9, pos] != 0
-        terminated = terminated | (alien_map[9, pos] != 0)
+        terminated = mx.sum(e_bullet_map[9] * (GRID == pos)) != 0
+        terminated = terminated | (mx.sum(alien_map[9] * (GRID == pos)) != 0)
 
         move = alien_move_timer == 0
         count = mx.sum(alien_map)
@@ -89,12 +89,16 @@ class SpaceInvaders(Environment):
         at_right = mx.sum(alien_map[:, 9]) > 0
         edge = (at_left & (alien_dir < 0)) | (at_right & (alien_dir > 0))
         rolled_down = mx.roll(alien_map, 1, axis=0)
-        rolled_horizontal = mx.roll(alien_map, alien_dir, axis=1)
+        rolled_horizontal = mx.where(
+            alien_dir < 0,
+            mx.roll(alien_map, -1, axis=1),
+            mx.roll(alien_map, 1, axis=1),
+        )
         moved_map = mx.where(edge, rolled_down, rolled_horizontal)
         new_alien_map = mx.where(move, moved_map, alien_map)
         alien_dir = mx.where(move & edge, -alien_dir, alien_dir)
         terminated = terminated | (move & edge & (mx.sum(alien_map[9, :]) > 0))
-        terminated = terminated | (move & (new_alien_map[9, pos] != 0))
+        terminated = terminated | (move & (mx.sum(new_alien_map[9] * (GRID == pos)) != 0))
         alien_map = new_alien_map
         alien_move_timer = mx.where(
             move, mx.minimum(count, enemy_move_interval), alien_move_timer
@@ -104,7 +108,7 @@ class SpaceInvaders(Environment):
         has_alien_col = mx.sum(alien_map, axis=0) > 0
         score = mx.where(has_alien_col, mx.abs(GRID - pos) * 10 + GRID, 1000)
         target_col = mx.argmin(score)
-        column = alien_map[:, target_col]
+        column = mx.sum(alien_map * (GRID.reshape(1, 10) == target_col), axis=1)
         target_row = mx.max(mx.where(column > 0, GRID, -1))
         e_bullet_map = mx.where(
             do_shot & (ROW == target_row) & (COL == target_col), 1.0, e_bullet_map

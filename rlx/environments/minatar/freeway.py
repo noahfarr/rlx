@@ -27,20 +27,20 @@ class Freeway(Environment):
     def _observation(self, state: EnvState) -> mx.array:
         pos, car_x, car_speed = state["pos"], state["car_x"], state["car_speed"]
 
-        chicken = (GRID.reshape(10, 1) == pos) & (GRID.reshape(1, 10) == 4)
+        chicken = (GRID.reshape(10, 1) == pos) * (GRID.reshape(1, 10) == 4)
         row_oh = GRID.reshape(1, 10, 1) == CAR_Y.reshape(8, 1, 1)
-        car_oh = row_oh & (GRID.reshape(1, 1, 10) == car_x.reshape(8, 1, 1))
+        car_oh = row_oh * (GRID.reshape(1, 1, 10) == car_x.reshape(8, 1, 1))
         car_channel = mx.max(car_oh, axis=0)
 
         back_x = mx.where(car_speed > 0, car_x - 1, car_x + 1)
         back_x = mx.where(back_x < 0, 9, back_x)
         back_x = mx.where(back_x > 9, 0, back_x)
-        trail_oh = row_oh & (GRID.reshape(1, 1, 10) == back_x.reshape(8, 1, 1))
+        trail_oh = row_oh * (GRID.reshape(1, 1, 10) == back_x.reshape(8, 1, 1))
         speed_idx = mx.abs(car_speed)
 
         channels = [chicken, car_channel]
         for k in range(1, 6):
-            channels.append(mx.max(trail_oh & (speed_idx == k).reshape(8, 1, 1), axis=0))
+            channels.append(mx.max(trail_oh * (speed_idx == k).reshape(8, 1, 1), axis=0))
         return mx.stack(channels, axis=-1).astype(mx.float32)
 
     def reset(self, key: mx.array) -> tuple[mx.array, EnvState, dict]:

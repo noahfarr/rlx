@@ -27,22 +27,22 @@ class Asterix(Environment):
         gold = state["entity_gold"]
         lr = state["entity_lr"]
 
-        player = (ROW == state["player_y"]) & (COL == state["player_x"])
+        player = (ROW == state["player_y"]) * (COL == state["player_x"])
         row_oh = GRID.reshape(1, 10, 1) == ENTITY_Y.reshape(8, 1, 1)
         entity_oh = (
             row_oh
-            & (GRID.reshape(1, 1, 10) == x.reshape(8, 1, 1))
-            & active.reshape(8, 1, 1)
+            * (GRID.reshape(1, 1, 10) == x.reshape(8, 1, 1))
+            * active.reshape(8, 1, 1)
         )
-        enemy = mx.max(entity_oh & (~gold).reshape(8, 1, 1), axis=0)
-        gold_channel = mx.max(entity_oh & gold.reshape(8, 1, 1), axis=0)
+        enemy = mx.max(entity_oh * (~gold).reshape(8, 1, 1), axis=0)
+        gold_channel = mx.max(entity_oh * gold.reshape(8, 1, 1), axis=0)
 
         back_x = mx.where(lr, x - 1, x + 1)
-        in_bounds = (back_x >= 0) & (back_x <= 9)
+        in_bounds = (back_x >= 0) * (back_x <= 9)
         trail_oh = (
             row_oh
-            & (GRID.reshape(1, 1, 10) == mx.clip(back_x, 0, 9).reshape(8, 1, 1))
-            & (active & in_bounds).reshape(8, 1, 1)
+            * (GRID.reshape(1, 1, 10) == mx.clip(back_x, 0, 9).reshape(8, 1, 1))
+            * (active * in_bounds).reshape(8, 1, 1)
         )
         trail = mx.max(trail_oh, axis=0)
         return mx.stack([player, enemy, trail, gold_channel], axis=-1).astype(mx.float32)
